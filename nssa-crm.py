@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -88,7 +88,7 @@ if uploaded_file:
         df_upload["follow_up_date"] = pd.to_datetime(df_upload["follow_up_date"]).dt.strftime("%Y-%m-%d")
     if "notes" in df_upload.columns:
         df_upload.drop(columns=["notes"], inplace=True)
-    df_upload = df_upload.where(pd.notnull(df_upload), None)  # Replace NaNs with None for JSON compliance
+    df_upload = df_upload.where(pd.notnull(df_upload), None)
     try:
         supabase.table("prospects").insert(df_upload.to_dict(orient="records")).execute()
         st.success("CSV uploaded and processed successfully.")
@@ -119,11 +119,16 @@ with st.expander("📋 View All Prospects", expanded=True):
             new_website = st.text_input("Website", row["website"])
             new_assigned_to = st.text_input("Assigned To (Email)", row["assigned_to_email"])
             new_clients = st.multiselect("Assign to Client(s)", CLIENT_OPTIONS, row.get("clients", "").split(",") if row.get("clients") else [])
-            new_notes = st.text_area("Notes", row.get("notes", ""))
+            additional_notes = st.text_area("Notes (appended with date)", "")
             new_follow_up = st.date_input("Follow-Up Date", value=pd.to_datetime(row["follow_up_date"]))
             updated = st.form_submit_button("Update Prospect")
 
             if updated:
+                appended_notes = row.get("notes", "")
+                if additional_notes:
+                    today_str = date.today().strftime("%Y-%m-%d")
+                    appended_notes += f"\n[{today_str}] {additional_notes}"
+
                 update_data = {
                     "first_name": new_first,
                     "last_name": new_last,
@@ -136,12 +141,11 @@ with st.expander("📋 View All Prospects", expanded=True):
                     "assigned_to_email": new_assigned_to,
                     "follow_up_date": str(new_follow_up),
                     "clients": ",".join(new_clients),
-                    "notes": new_notes
+                    "notes": appended_notes
                 }
                 supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
                 st.success("Prospect updated. Please reload the app to see changes.")
 
-                # Send follow-up notification on edit
                 subject = f"Follow-Up Updated: {new_first} {new_last}"
                 body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
                 send_email(new_assigned_to, subject, body)
@@ -157,9 +161,9 @@ today = datetime.today().date()
 st.subheader("🔔 Follow-Ups Due Soon")
 if not df.empty:
     df["follow_up_date"] = pd.to_datetime(df["follow_up_date"]).dt.date
-    upcoming = df[df["follow_up_date"] <= today + timedelta(days=3)]
+    upcoming = df[df["follow_up_date"] <= today + timedelta(days=5)]
     if not upcoming.empty:
-        st.warning("These follow-ups are due in the next 3 days:")
+        st.warning("These follow-ups are due in the next 5 days:")
         st.table(upcoming[["first_name", "last_name", "company", "follow_up_date"]])
 
         for _, row in upcoming.iterrows():
@@ -170,3 +174,4 @@ if not df.empty:
                 send_email(recipient, subject, body)
     else:
         st.success("No upcoming follow-ups!")
+
