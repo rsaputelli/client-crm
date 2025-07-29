@@ -80,7 +80,7 @@ with st.sidebar.form("add_prospect"):
             st.error("Failed to add prospect. Please check your fields.")
 
 # === Upload CSV ===
-st.sidebar.header("📤 Upload Prospects CSV")
+st.sidebar.header("📄 Upload Prospects CSV")
 uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
 if uploaded_file:
     df_upload = pd.read_csv(uploaded_file)
@@ -118,7 +118,7 @@ with st.expander("📋 View All Prospects", expanded=True):
             new_address = st.text_area("Address", row["address"])
             new_website = st.text_input("Website", row["website"])
             new_assigned_to = st.text_input("Assigned To (Email)", row["assigned_to_email"])
-            new_clients = st.multiselect("Assign to Client(s)", CLIENT_OPTIONS, row["clients"].split(",") if row["clients"] else [])
+            new_clients = st.multiselect("Assign to Client(s)", CLIENT_OPTIONS, row.get("clients", "").split(",") if row.get("clients") else [])
             new_notes = st.text_area("Notes", row.get("notes", ""))
             new_follow_up = st.date_input("Follow-Up Date", value=pd.to_datetime(row["follow_up_date"]))
             updated = st.form_submit_button("Update Prospect")
