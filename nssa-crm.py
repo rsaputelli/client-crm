@@ -48,7 +48,6 @@ with st.sidebar.form("add_prospect"):
     address = st.text_area("Address")
     website = st.text_input("Website")
     assigned_to = st.text_input("Assigned To (Email)")
-    notes = st.text_area("Notes")
     follow_up = st.date_input("Follow-Up Date", value=datetime.today() + timedelta(days=7))
     submitted = st.form_submit_button("Add Prospect")
 
@@ -62,7 +61,6 @@ with st.sidebar.form("add_prospect"):
             "email": email,
             "address": address,
             "website": website,
-            "notes": notes,
             "follow_up_date": str(follow_up),
             "assigned_to_email": assigned_to
         }
@@ -77,9 +75,11 @@ st.sidebar.header("📤 Upload Prospects CSV")
 uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
 if uploaded_file:
     df_upload = pd.read_csv(uploaded_file)
-    df_upload = df_upload.where(pd.notnull(df_upload), None)  # Replace NaNs with None for JSON compliance
     if "follow_up_date" in df_upload.columns:
         df_upload["follow_up_date"] = pd.to_datetime(df_upload["follow_up_date"]).dt.date
+    if "notes" in df_upload.columns:
+        df_upload.drop(columns=["notes"], inplace=True)
+    df_upload = df_upload.where(pd.notnull(df_upload), None)  # Replace NaNs with None for JSON compliance
     try:
         supabase.table("prospects").insert(df_upload.to_dict(orient="records")).execute()
         st.success("CSV uploaded and processed successfully.")
@@ -114,3 +114,4 @@ if not df.empty:
                 send_email(recipient, subject, body)
     else:
         st.success("No upcoming follow-ups!")
+
