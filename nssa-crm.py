@@ -69,7 +69,7 @@ with st.sidebar.form("add_prospect"):
             "address": address,
             "website": website,
             "assigned_to_email": assigned_to,
-            "follow_up_date": str(follow_up),
+            "follow_up_date": follow_up.strftime("%Y-%m-%d"),
             "notes": notes,
             "clients": ",".join(clients)
         }
@@ -140,20 +140,27 @@ with st.expander("📋 View All Prospects", expanded=True):
                     "address": new_address,
                     "website": new_website,
                     "assigned_to_email": new_assigned_to,
-                    "follow_up_date": str(new_follow_up),
+                    "follow_up_date": new_follow_up.strftime("%Y-%m-%d"),
                     "clients": ",".join(new_clients),
                     "notes": appended_notes
                 }
-                supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
-                st.success("Prospect updated. Please reload the app to see changes.")
 
-                subject = f"Follow-Up Updated: {new_first} {new_last}"
-                body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
-                send_email(new_assigned_to, subject, body)
+                if "id" in row and row["id"]:
+                    supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
+                    st.success("Prospect updated. Please reload the app to see changes.")
+
+                    subject = f"Follow-Up Updated: {new_first} {new_last}"
+                    body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
+                    send_email(new_assigned_to, subject, body)
+                else:
+                    st.error("Prospect ID not found. Cannot update.")
 
         if st.button("🗑️ Delete Prospect"):
-            supabase.table("prospects").delete().eq("id", row["id"]).execute()
-            st.success("Prospect deleted. Please reload the app to see changes.")
+            if "id" in row and row["id"]:
+                supabase.table("prospects").delete().eq("id", row["id"]).execute()
+                st.success("Prospect deleted. Please reload the app to see changes.")
+            else:
+                st.error("Prospect ID not found. Cannot delete.")
     else:
         st.info("No prospects found.")
 
@@ -175,4 +182,3 @@ if not df.empty:
                 send_email(recipient, subject, body)
     else:
         st.success("No upcoming follow-ups!")
-
