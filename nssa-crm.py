@@ -1,4 +1,4 @@
-# === Streamlit CRM App for NSSA (Enhanced) ===
+# === Streamlit CRM App for Multi-Client Tracking ===
 import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
@@ -17,8 +17,13 @@ EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.set_page_config(page_title="NSSA CRM", layout="wide")
-st.title("📇 NSSA Prospect CRM")
+st.set_page_config(page_title="Client Prospect CRM", layout="wide")
+st.title("📇 Multi-Client Prospect Tracker")
+
+CLIENT_OPTIONS = [
+    "WOEMA", "SCAAP", "CTAAP", "NJAFP", "DAFP", "MAFP", "HAFP",
+    "PAACP", "DEACP", "ACPNJ", "NSSA", "SEMPA", "WAPA"
+]
 
 # === Function to Send Email ===
 def send_email(to_address, subject, body):
@@ -48,6 +53,8 @@ with st.sidebar.form("add_prospect"):
     address = st.text_area("Address")
     website = st.text_input("Website")
     assigned_to = st.text_input("Assigned To (Email)")
+    clients = st.multiselect("Assign to Client(s)", CLIENT_OPTIONS)
+    notes = st.text_area("Notes")
     follow_up = st.date_input("Follow-Up Date", value=datetime.today() + timedelta(days=7))
     submitted = st.form_submit_button("Add Prospect")
 
@@ -61,8 +68,10 @@ with st.sidebar.form("add_prospect"):
             "email": email,
             "address": address,
             "website": website,
+            "assigned_to_email": assigned_to,
             "follow_up_date": str(follow_up),
-            "assigned_to_email": assigned_to
+            "notes": notes,
+            "clients": ",".join(clients)
         }
         response = supabase.table("prospects").insert(data).execute()
         if response.status_code == 201:
@@ -109,6 +118,8 @@ with st.expander("📋 View All Prospects", expanded=True):
             new_address = st.text_area("Address", row["address"])
             new_website = st.text_input("Website", row["website"])
             new_assigned_to = st.text_input("Assigned To (Email)", row["assigned_to_email"])
+            new_clients = st.multiselect("Assign to Client(s)", CLIENT_OPTIONS, row["clients"].split(",") if row["clients"] else [])
+            new_notes = st.text_area("Notes", row.get("notes", ""))
             new_follow_up = st.date_input("Follow-Up Date", value=pd.to_datetime(row["follow_up_date"]))
             updated = st.form_submit_button("Update Prospect")
 
@@ -123,7 +134,9 @@ with st.expander("📋 View All Prospects", expanded=True):
                     "address": new_address,
                     "website": new_website,
                     "assigned_to_email": new_assigned_to,
-                    "follow_up_date": str(new_follow_up)
+                    "follow_up_date": str(new_follow_up),
+                    "clients": ",".join(new_clients),
+                    "notes": new_notes
                 }
                 supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
                 st.success("Prospect updated. Please reload the app to see changes.")
@@ -157,4 +170,3 @@ if not df.empty:
                 send_email(recipient, subject, body)
     else:
         st.success("No upcoming follow-ups!")
-
