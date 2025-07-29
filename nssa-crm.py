@@ -96,16 +96,17 @@ if uploaded_file:
         st.error(f"CSV upload failed: {e}")
 
 # === Load, Display, Edit, and Delete Prospects ===
-with st.expander("📋 View All Prospects", expanded=True):
-    data = supabase.table("prospects").select("*").execute()
-    df = pd.DataFrame(data.data)
-    if not df.empty:
-        df = df.sort_values(by="follow_up_date")
+data = supabase.table("prospects").select("*").execute()
+df = pd.DataFrame(data.data)
 
-        filter_clients = st.multiselect("Filter by Client", CLIENT_OPTIONS)
-        if filter_clients:
-            df = df[df["clients"].apply(lambda x: any(client in x for client in filter_clients if isinstance(x, str)))]
+filter_clients = st.multiselect("Filter by Client", CLIENT_OPTIONS)
+if not df.empty:
+    df = df.sort_values(by="follow_up_date")
 
+    if filter_clients:
+        df = df[df["clients"].apply(lambda x: any(client in x for client in filter_clients if isinstance(x, str)))]
+
+    with st.expander("📋 View All Prospects", expanded=True):
         st.dataframe(df.drop(columns=["id"]))
 
         selected = st.selectbox("Select a prospect to edit or delete", df["email"])
@@ -172,8 +173,8 @@ with st.expander("📋 View All Prospects", expanded=True):
                 st.success("Prospect deleted. Please reload the app to see changes.")
             else:
                 st.error("Prospect ID not found. Cannot delete.")
-    else:
-        st.info("No prospects found.")
+else:
+    st.info("No prospects found.")
 
 # === Reminders ===
 today = datetime.today().date()
@@ -193,3 +194,4 @@ if not df.empty:
                 send_email(recipient, subject, body)
     else:
         st.success("No upcoming follow-ups!")
+
