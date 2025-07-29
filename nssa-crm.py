@@ -128,6 +128,11 @@ with st.expander("📋 View All Prospects", expanded=True):
                 supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
                 st.success("Prospect updated. Please reload the app to see changes.")
 
+                # Send follow-up notification on edit
+                subject = f"Follow-Up Updated: {new_first} {new_last}"
+                body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
+                send_email(new_assigned_to, subject, body)
+
         if st.button("🗑️ Delete Prospect"):
             supabase.table("prospects").delete().eq("id", row["id"]).execute()
             st.success("Prospect deleted. Please reload the app to see changes.")
@@ -152,3 +157,4 @@ if not df.empty:
                 send_email(recipient, subject, body)
     else:
         st.success("No upcoming follow-ups!")
+
