@@ -77,6 +77,7 @@ st.sidebar.header("📤 Upload Prospects CSV")
 uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
 if uploaded_file:
     df_upload = pd.read_csv(uploaded_file)
+    df_upload = df_upload.where(pd.notnull(df_upload), None)  # Replace NaNs with None for JSON compliance
     if "follow_up_date" in df_upload.columns:
         df_upload["follow_up_date"] = pd.to_datetime(df_upload["follow_up_date"]).dt.date
     try:
@@ -113,4 +114,3 @@ if not df.empty:
                 send_email(recipient, subject, body)
     else:
         st.success("No upcoming follow-ups!")
-
