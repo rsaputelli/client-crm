@@ -41,6 +41,16 @@ def send_email(to_address, subject, body):
     except Exception as e:
         st.error(f"Failed to send email to {to_address}: {e}")
 
+# === Live Usage Summary ===
+try:
+    count_res = supabase.table("prospects").select("id", count="exact").execute()
+    row_count = count_res.count or 0
+    st.sidebar.markdown(f"### 📊 Total Prospects: {row_count}")
+    if row_count > 18000:
+        st.sidebar.warning("⚠️ Approaching Supabase Free Tier limit (20,000 rows)")
+except Exception as e:
+    st.sidebar.error("Could not fetch prospect count")
+
 # === Form to Add New Prospect ===
 st.sidebar.header("➕ Add New Prospect")
 with st.sidebar.form("add_prospect"):
@@ -197,4 +207,5 @@ if not df.empty:
                 send_email(recipient, subject, body)
     else:
         st.success("No upcoming follow-ups!")
+
 
