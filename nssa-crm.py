@@ -76,7 +76,7 @@ uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
 if uploaded_file:
     df_upload = pd.read_csv(uploaded_file)
     if "follow_up_date" in df_upload.columns:
-        df_upload["follow_up_date"] = pd.to_datetime(df_upload["follow_up_date"]).dt.date
+        df_upload["follow_up_date"] = pd.to_datetime(df_upload["follow_up_date"]).dt.strftime("%Y-%m-%d")
     if "notes" in df_upload.columns:
         df_upload.drop(columns=["notes"], inplace=True)
     df_upload = df_upload.where(pd.notnull(df_upload), None)  # Replace NaNs with None for JSON compliance
