@@ -86,13 +86,51 @@ if uploaded_file:
     except Exception as e:
         st.error(f"CSV upload failed: {e}")
 
-# === Load and Display Prospects ===
+# === Load, Display, Edit, and Delete Prospects ===
 with st.expander("📋 View All Prospects", expanded=True):
     data = supabase.table("prospects").select("*").execute()
     df = pd.DataFrame(data.data)
     if not df.empty:
         df = df.sort_values(by="follow_up_date")
         st.dataframe(df.drop(columns=["id"]))
+
+        selected = st.selectbox("Select a prospect to edit or delete", df["email"])
+        row = df[df["email"] == selected].iloc[0]
+
+        st.markdown("---")
+        st.subheader("✏️ Edit Prospect")
+        with st.form("edit_prospect"):
+            new_first = st.text_input("First Name", row["first_name"])
+            new_last = st.text_input("Last Name", row["last_name"])
+            new_title = st.text_input("Title", row["title"])
+            new_company = st.text_input("Company", row["company"])
+            new_phone = st.text_input("Phone", row["phone"])
+            new_email = st.text_input("Email", row["email"])
+            new_address = st.text_area("Address", row["address"])
+            new_website = st.text_input("Website", row["website"])
+            new_assigned_to = st.text_input("Assigned To (Email)", row["assigned_to_email"])
+            new_follow_up = st.date_input("Follow-Up Date", value=pd.to_datetime(row["follow_up_date"]))
+            updated = st.form_submit_button("Update Prospect")
+
+            if updated:
+                update_data = {
+                    "first_name": new_first,
+                    "last_name": new_last,
+                    "title": new_title,
+                    "company": new_company,
+                    "phone": new_phone,
+                    "email": new_email,
+                    "address": new_address,
+                    "website": new_website,
+                    "assigned_to_email": new_assigned_to,
+                    "follow_up_date": str(new_follow_up)
+                }
+                supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
+                st.success("Prospect updated. Please reload the app to see changes.")
+
+        if st.button("🗑️ Delete Prospect"):
+            supabase.table("prospects").delete().eq("id", row["id"]).execute()
+            st.success("Prospect deleted. Please reload the app to see changes.")
     else:
         st.info("No prospects found.")
 
@@ -114,4 +152,3 @@ if not df.empty:
                 send_email(recipient, subject, body)
     else:
         st.success("No upcoming follow-ups!")
-
