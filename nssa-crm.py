@@ -101,6 +101,11 @@ with st.expander("📋 View All Prospects", expanded=True):
     df = pd.DataFrame(data.data)
     if not df.empty:
         df = df.sort_values(by="follow_up_date")
+
+        filter_clients = st.multiselect("Filter by Client", CLIENT_OPTIONS)
+        if filter_clients:
+            df = df[df["clients"].apply(lambda x: any(client in x for client in filter_clients if isinstance(x, str)))]
+
         st.dataframe(df.drop(columns=["id"]))
 
         selected = st.selectbox("Select a prospect to edit or delete", df["email"])
@@ -119,6 +124,7 @@ with st.expander("📋 View All Prospects", expanded=True):
             new_website = st.text_input("Website", row["website"])
             new_assigned_to = st.text_input("Assigned To (Email)", row["assigned_to_email"])
             new_clients = st.multiselect("Assign to Client(s)", CLIENT_OPTIONS, row.get("clients", "").split(",") if row.get("clients") else [])
+            st.text_area("Existing Notes", row.get("notes", ""), disabled=True)
             additional_notes = st.text_area("Notes (appended with date)", "")
             new_follow_up = st.date_input("Follow-Up Date", value=pd.to_datetime(row["follow_up_date"]))
             updated = st.form_submit_button("Update Prospect")
