@@ -5,8 +5,8 @@ from supabase import create_client, Client
 from datetime import datetime, timedelta
 
 # === CONFIGURATION ===
-SUPABASE_URL = st.secrets["https://xpjewdvgkwunvocrihyq.supabase.co"]
-SUPABASE_KEY = st.secrets["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwamV3ZHZna3d1bnZvY3JpaHlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM3OTg1NTksImV4cCI6MjA2OTM3NDU1OX0.1YbKo5hE2wrQZVgCb0jD-h0JsVX5LbU_k6P5_Ddv89k"]
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 # === Initialize Supabase ===
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
