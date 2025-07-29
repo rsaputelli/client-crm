@@ -124,7 +124,8 @@ with st.expander("📋 View All Prospects", expanded=True):
             updated = st.form_submit_button("Update Prospect")
 
             if updated:
-                appended_notes = row.get("notes", "")
+                old_notes = row.get("notes")
+                appended_notes = str(old_notes) if pd.notnull(old_notes) else ""
                 if additional_notes:
                     today_str = date.today().strftime("%Y-%m-%d")
                     appended_notes += f"\n[{today_str}] {additional_notes}"
