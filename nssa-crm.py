@@ -145,13 +145,18 @@ with st.expander("📋 View All Prospects", expanded=True):
                     "notes": appended_notes
                 }
 
-                if "id" in row and row["id"]:
-                    supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
-                    st.success("Prospect updated. Please reload the app to see changes.")
+                if "id" in row and pd.notnull(row["id"]):
+                    try:
+                        update_data["notes"] = str(update_data["notes"])
+                        update_data["clients"] = ",".join(new_clients) if new_clients else ""
+                        supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
+                        st.success("Prospect updated. Please reload the app to see changes.")
 
-                    subject = f"Follow-Up Updated: {new_first} {new_last}"
-                    body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
-                    send_email(new_assigned_to, subject, body)
+                        subject = f"Follow-Up Updated: {new_first} {new_last}"
+                        body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
+                        send_email(new_assigned_to, subject, body)
+                    except Exception as e:
+                        st.error(f"Failed to update prospect: {e}")
                 else:
                     st.error("Prospect ID not found. Cannot update.")
 
