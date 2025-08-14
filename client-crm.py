@@ -35,7 +35,7 @@ if "sb_session" in st.session_state and st.session_state["sb_session"]:
         pass
 
 # === Branding header ===
-header_left, header_right = st.columns([1, 8])
+header_left, header_right = st.columns([3, 8])   # wider left column
 
 def _find_logo():
     for p in ("assets/logo.png", "logo.png"):
@@ -46,7 +46,7 @@ def _find_logo():
 with header_left:
     _logo = _find_logo()
     if _logo:
-        st.image(_logo, width=600)
+        st.image(_logo, width=220)
     else:
         st.caption("(logo not found: assets/logo.png or logo.png)")
 with header_right:
@@ -422,6 +422,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
