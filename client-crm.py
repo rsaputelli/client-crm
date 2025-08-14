@@ -8,6 +8,10 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from zoneinfo import ZoneInfo
 from collections import defaultdict
+import os
+
+# ✅ Page config MUST be the first Streamlit call or favicon/logo can be ignored
+st.set_page_config(page_title="Client Prospect CRM", page_icon="assets/logo.png", layout="wide")
 
 # === CONFIGURATION ===
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -30,23 +34,25 @@ if "sb_session" in st.session_state and st.session_state["sb_session"]:
         # If token expired/invalid, user can sign in again
         pass
 
-# === Page config + Branding ===
-st.set_page_config(page_title="Client Prospect CRM", page_icon="assets/logo.png", layout="wide")
-
-# Header with logo + title
+# === Branding header ===
 header_left, header_right = st.columns([1, 8])
 with header_left:
-    try:
-        st.image("assets/logo.png", width=56)
-    except Exception:
-        pass  # if logo missing, continue without error
+    logo_path = "assets/logo.png"
+    if os.path.exists(logo_path):
+        st.image(logo_path, width=56)
+    else:
+        st.caption("(logo missing: assets/logo.png)")
 with header_right:
-    st.markdown("## Lutine Management Multi-Client Prospect Tracker")
+    st.markdown("## Multi-Client Prospect Tracker")
 
 CLIENT_OPTIONS = [
     "WOEMA", "SCAAP", "CTAAP", "NJAFP", "DAFP", "MAFP", "HAFP",
     "PAACP", "DEACP", "ACPNJ", "NSSA", "SEMPA", "WAPA"
 ]
+
+# Optional: sidebar logo
+if os.path.exists("assets/logo.png"):
+    st.sidebar.image("assets/logo.png", use_column_width=True)
 
 # === Auth UI (required for RLS to identify users) ===
 st.sidebar.markdown("### 🔐 Sign in")
@@ -296,7 +302,8 @@ if not df.empty:
                         appended_notes = str(old_notes) if pd.notnull(old_notes) else ""
                         if additional_notes:
                             today_str = date.today().strftime("%Y-%m-%d")
-                            appended_notes += f"[{today_str}] {additional_notes}"
+                            appended_notes += f"
+[{today_str}] {additional_notes}"
 
                         safe_new_clients = new_clients if IS_ADMIN else [c for c in new_clients if c in ALLOWED]
                         update_data = {
@@ -394,7 +401,8 @@ if not df.empty:
             subject = "Follow-Up Digest: Overdue & Upcoming (7 days)"
 
             try:
-                send_email(recipient, subject, "\n".join(body_lines))
+                send_email(recipient, subject, "
+".join(body_lines))
 
                 # Mark all those records as reminded today (so we don't resend on pings)
                 prospect_ids = [it["id"] for it in items if it["id"] is not None]
@@ -409,6 +417,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
