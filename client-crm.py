@@ -286,8 +286,7 @@ if not df.empty:
                         appended_notes = str(old_notes) if pd.notnull(old_notes) else ""
                         if additional_notes:
                             today_str = date.today().strftime("%Y-%m-%d")
-                            appended_notes += f"
-[{today_str}] {additional_notes}"
+                            appended_notes += f"[{today_str}] {additional_notes}"
 
                         safe_new_clients = new_clients if IS_ADMIN else [c for c in new_clients if c in ALLOWED]
                         update_data = {
@@ -385,8 +384,7 @@ if not df.empty:
             subject = "Follow-Up Digest: Overdue & Upcoming (7 days)"
 
             try:
-                send_email(recipient, subject, "
-".join(body_lines))
+                send_email(recipient, subject, "\n".join(body_lines))
 
                 # Mark all those records as reminded today (so we don't resend on pings)
                 prospect_ids = [it["id"] for it in items if it["id"] is not None]
@@ -401,6 +399,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
