@@ -190,22 +190,60 @@ else:
     st.info("No prospects found.")
 
 # === Reminders ===
-today = datetime.today().date()
-st.subheader("🔔 Follow-Ups Due Soon")
+from zoneinfo import ZoneInfo  # Python 3.9+
+REMINDER_WINDOW_DAYS = 7
+
+# Use America/New_York to align "once per day" with your local day
+today = datetime.now(ZoneInfo("America/New_York")).date()
+window_end = today + timedelta(days=REMINDER_WINDOW_DAYS)
+
+st.subheader("🔔 Follow-Ups Due Within 7 Days")
+
 if not df.empty:
-    df["follow_up_date"] = pd.to_datetime(df["follow_up_date"]).dt.date
-    upcoming = df[df["follow_up_date"] <= today + timedelta(days=5)]
+    # Normalize dates
+    df["follow_up_date"] = pd.to_datetime(df["follow_up_date"], errors="coerce").dt.date
+
+    # Ensure the column exists in the dataframe (may be null for most rows initially)
+    if "last_reminded_on" not in df.columns:
+        df["last_reminded_on"] = None
+    else:
+        df["last_reminded_on"] = pd.to_datetime(df["last_reminded_on"], errors="coerce").dt.date
+
+    # Only upcoming (today..+7); skip past-due to avoid daily nagging if you prefer
+    upcoming = df[
+        (df["follow_up_date"] >= today) & (df["follow_up_date"] <= window_end)
+    ].copy()
+
     if not upcoming.empty:
-        st.warning("These follow-ups are due in the next 5 days:")
+        st.warning("These follow-ups are due within the next 7 days:")
         st.table(upcoming[["first_name", "last_name", "company", "follow_up_date"]])
 
+        # Send at most once per day per record
         for _, row in upcoming.iterrows():
+            already_sent_today = (row.get("last_reminded_on") == today)
             recipient = row.get("assigned_to_email")
-            if recipient:
-                subject = f"Follow-Up Reminder: {row['first_name']} {row['last_name']}"
-                body = f"Reminder to follow up with {row['company']} on {row['follow_up_date']}"
-                send_email(recipient, subject, body)
+            prospect_id = row.get("id")
+
+            if recipient and prospect_id and not already_sent_today:
+                subject = f"Follow-Up Reminder: {row.get('first_name', '')} {row.get('last_name', '')}"
+                body = (
+                    f"Reminder to follow up with {row.get('company','(Company)')} "
+                    f"on {row.get('follow_up_date')}"
+                )
+                try:
+                    send_email(recipient, subject, body)
+
+                    # Mark as reminded for today to suppress repeat sends
+                    supabase.table("prospects").update(
+                        {"last_reminded_on": today.isoformat()}
+                    ).eq("id", prospect_id).execute()
+                except Exception as e:
+                    st.error(f"Failed to send reminder for ID {prospect_id}: {e}")
     else:
-        st.success("No upcoming follow-ups!")
+        st.success("No follow-ups due within the next 7 days!")
+else:
+    st.info("No prospects found.")
+
+
 
 
