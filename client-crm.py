@@ -30,8 +30,16 @@ if "sb_session" in st.session_state and st.session_state["sb_session"]:
         # If token expired/invalid, user can sign in again
         pass
 
-st.set_page_config(page_title="Client Prospect CRM", layout="wide")
-st.title("📇 Multi-Client Prospect Tracker")
+st.set_page_config(page_title="Client Prospect CRM",
+                   page_icon="assets/logo.png",  # favicon
+                   layout="wide")
+
+# Replace the plain title with a logo+title header
+left, right = st.columns([1, 8])
+with left:
+    st.image("assets/logo.png", width=56)
+with right:
+    st.markdown("## Multi-Client Prospect Tracker")
 
 CLIENT_OPTIONS = [
     "WOEMA", "SCAAP", "CTAAP", "NJAFP", "DAFP", "MAFP", "HAFP",
@@ -399,6 +407,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
