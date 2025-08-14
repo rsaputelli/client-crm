@@ -46,7 +46,7 @@ def _find_logo():
 with header_left:
     _logo = _find_logo()
     if _logo:
-        st.image(_logo, width=56)
+        st.image(_logo, width=140)
     else:
         st.caption("(logo not found: assets/logo.png or logo.png)")
 with header_right:
@@ -59,7 +59,7 @@ CLIENT_OPTIONS = [
 
 # Optional: sidebar logo
 if _find_logo():
-    st.sidebar.image(_find_logo(), use_column_width=True)
+    st.sidebar.image(_find_logo(), use_container_width=True)
 
 # === Auth UI (required for RLS to identify users) ===
 st.sidebar.markdown("### 🔐 Sign in")
