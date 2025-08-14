@@ -1,4 +1,4 @@
-# === Streamlit CRM App for Multi-Client Tracking ===
+# === Streamlit CRM App for Multi-Client Tracking (RLS-aware UI) ===
 import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
@@ -6,10 +6,12 @@ from datetime import datetime, timedelta, date
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from zoneinfo import ZoneInfo
+from collections import defaultdict
 
 # === CONFIGURATION ===
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]  # anon key is fine for app init; auth will attach user JWT after sign-in
 EMAIL_HOST = st.secrets["EMAIL_HOST"]
 EMAIL_PORT = st.secrets["EMAIL_PORT"]
 EMAIL_USER = st.secrets["EMAIL_USER"]
@@ -25,7 +27,66 @@ CLIENT_OPTIONS = [
     "PAACP", "DEACP", "ACPNJ", "NSSA", "SEMPA", "WAPA"
 ]
 
+# === Auth UI (required for RLS to identify users) ===
+st.sidebar.markdown("### 🔐 Sign in")
+email_login = st.sidebar.text_input("Email", key="login_email")
+password_login = st.sidebar.text_input("Password", type="password", key="login_pw")
+col_a, col_b = st.sidebar.columns(2)
+if col_a.button("Sign in"):
+    try:
+        auth_res = supabase.auth.sign_in_with_password({"email": email_login, "password": password_login})
+        st.session_state["session"] = getattr(auth_res, "session", None) or auth_res
+        st.success("Signed in.")
+    except Exception as e:
+        st.error(f"Sign-in failed: {e}")
+if col_b.button("Sign out"):
+    try:
+        supabase.auth.sign_out()
+    except Exception:
+        pass
+    st.session_state.pop("session", None)
+    st.experimental_rerun()
+
+# Helper to get current user email from session
+
+def _current_user_email():
+    try:
+        sess_res = supabase.auth.get_session()
+        session = getattr(sess_res, "session", None) or sess_res
+        user = getattr(session, "user", None) if session else None
+        return getattr(user, "email", None)
+    except Exception:
+        return None
+
+# ---- Access helpers (UI convenience; RLS is the real gate) ----
+
+def get_user_access():
+    """Return dict(email, allowed_clients, is_admin). Requires authenticated session."""
+    email = _current_user_email()
+    if not email:
+        return {"email": None, "allowed_clients": [], "is_admin": False}
+    try:
+        ua = supabase.table("user_access").select("allowed_clients,is_admin").eq("email", email).single().execute()
+        row = getattr(ua, "data", None) or {}
+    except Exception:
+        row = {}
+    allowed = row.get("allowed_clients") or []
+    is_admin = bool(row.get("is_admin", False))
+    if is_admin:
+        allowed = CLIENT_OPTIONS
+    return {"email": email, "allowed_clients": allowed, "is_admin": is_admin}
+
+# Block app if not signed in (so UI mirrors RLS)
+access = get_user_access()
+USER_EMAIL = access["email"]
+ALLOWED = access["allowed_clients"]
+IS_ADMIN = access["is_admin"]
+if USER_EMAIL is None:
+    st.warning("Please sign in to view and manage prospects.")
+    st.stop()
+
 # === Function to Send Email ===
+
 def send_email(to_address, subject, body):
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
@@ -53,6 +114,7 @@ except Exception:
 
 # === Form to Add New Prospect ===
 st.sidebar.header("➕ Add New Prospect")
+clients_choices_for_user = CLIENT_OPTIONS if IS_ADMIN else ALLOWED
 with st.sidebar.form("add_prospect"):
     first = st.text_input("First Name")
     last = st.text_input("Last Name")
@@ -63,12 +125,13 @@ with st.sidebar.form("add_prospect"):
     address = st.text_area("Address")
     website = st.text_input("Website")
     assigned_to = st.text_input("Assigned To (Email)")
-    clients = st.multiselect("Assign to Client(s)", CLIENT_OPTIONS)
+    clients = st.multiselect("Assign to Client(s)", clients_choices_for_user)
     notes = st.text_area("Notes")
     follow_up = st.date_input("Follow-Up Date", value=datetime.today() + timedelta(days=7))
     submitted = st.form_submit_button("Add Prospect")
 
     if submitted:
+        safe_clients = clients if IS_ADMIN else [c for c in clients if c in ALLOWED]
         data = {
             "first_name": first,
             "last_name": last,
@@ -81,7 +144,7 @@ with st.sidebar.form("add_prospect"):
             "assigned_to_email": assigned_to,
             "follow_up_date": follow_up.strftime("%Y-%m-%d"),
             "notes": notes,
-            "clients": ",".join(clients)
+            "clients": ",".join(safe_clients),
         }
         try:
             resp = supabase.table("prospects").insert(data).execute()
@@ -103,6 +166,14 @@ if uploaded_file:
     if "notes" in df_upload.columns:
         df_upload.drop(columns=["notes"], inplace=True)
     df_upload = df_upload.where(pd.notnull(df_upload), None)
+
+    # Sanitize client assignments for non-admins
+    if not IS_ADMIN and "clients" in df_upload.columns:
+        df_upload["clients"] = df_upload["clients"].fillna("")
+        df_upload["clients"] = df_upload["clients"].apply(
+            lambda s: ",".join([c for c in str(s).split(',') if c in ALLOWED])
+        )
+
     try:
         resp = supabase.table("prospects").insert(df_upload.to_dict(orient="records")).execute()
         if getattr(resp, "data", None):
@@ -121,105 +192,124 @@ except Exception as e:
     st.error(f"Failed to load prospects: {e}")
     df = pd.DataFrame()
 
-filter_clients = st.multiselect("Filter by Client", CLIENT_OPTIONS)
-if not df.empty:
-    df = df.sort_values(by="follow_up_date")
+# UI filter choices limited by role
+client_choices = CLIENT_OPTIONS if IS_ADMIN else ALLOWED
+filter_clients = st.multiselect(
+    "Filter by Client",
+    client_choices,
+    default=([] if IS_ADMIN else ALLOWED),
+)
 
+if not df.empty:
+    # Hard-limit non-admin view to allowed clients (belt-and-suspenders; RLS should also enforce)
+    if not IS_ADMIN:
+        df = df[df["clients"].apply(lambda x: any(c in x for c in ALLOWED) if isinstance(x, str) else False)]
+
+    # Apply selected filter
     if filter_clients:
-        df = df[df["clients"].apply(lambda x: any(client in x for client in filter_clients if isinstance(x, str)))]
+        df = df[df["clients"].apply(lambda x: any(client in x for client in filter_clients) if isinstance(x, str) else False)]
 
     if not df.empty:
+        df = df.sort_values(by="follow_up_date")
         with st.expander("📋 View All Prospects", expanded=True):
             safe_cols = [c for c in df.columns if c != "id"]
             st.dataframe(df[safe_cols])
 
-            selected = st.selectbox("Select a prospect to edit or delete", df["email"])
-            row = df[df["email"] == selected].iloc[0]
+            # Protect against empty selection list
+            try:
+                selected = st.selectbox("Select a prospect to edit or delete", df["email"])
+                row = df[df["email"] == selected].iloc[0]
+            except Exception:
+                st.info("No selectable rows.")
+                row = None
 
-            st.markdown("---")
-            st.subheader("✏️ Edit Prospect")
-            with st.form("edit_prospect"):
-                new_first = st.text_input("First Name", row.get("first_name", ""))
-                new_last = st.text_input("Last Name", row.get("last_name", ""))
-                new_title = st.text_input("Title", row.get("title", ""))
-                new_company = st.text_input("Company", row.get("company", ""))
-                new_phone = st.text_input("Phone", row.get("phone", ""))
-                new_email = st.text_input("Email", row.get("email", ""))
-                new_address = st.text_area("Address", row.get("address", ""))
-                new_website = st.text_input("Website", row.get("website", ""))
-                new_assigned_to = st.text_input("Assigned To (Email)", row.get("assigned_to_email", ""))
-                new_clients = st.multiselect(
-                    "Assign to Client(s)",
-                    CLIENT_OPTIONS,
-                    row.get("clients", "").split(",") if row.get("clients") else []
-                )
-                st.text_area("Existing Notes", row.get("notes", ""), disabled=True)
-                additional_notes = st.text_area("Notes (appended with date)", "")
-                new_follow_up = st.date_input("Follow-Up Date", value=pd.to_datetime(row.get("follow_up_date")))
-                updated = st.form_submit_button("Update Prospect")
+            if row is not None:
+                st.markdown("---")
+                st.subheader("✏️ Edit Prospect")
+                with st.form("edit_prospect"):
+                    new_first = st.text_input("First Name", row.get("first_name", ""))
+                    new_last = st.text_input("Last Name", row.get("last_name", ""))
+                    new_title = st.text_input("Title", row.get("title", ""))
+                    new_company = st.text_input("Company", row.get("company", ""))
+                    new_phone = st.text_input("Phone", row.get("phone", ""))
+                    new_email = st.text_input("Email", row.get("email", ""))
+                    new_address = st.text_area("Address", row.get("address", ""))
+                    new_website = st.text_input("Website", row.get("website", ""))
+                    new_assigned_to = st.text_input("Assigned To (Email)", row.get("assigned_to_email", ""))
 
-                if updated:
-                    old_notes = row.get("notes")
-                    appended_notes = str(old_notes) if pd.notnull(old_notes) else ""
-                    if additional_notes:
-                        today_str = date.today().strftime("%Y-%m-%d")
-                        appended_notes += f"\n[{today_str}] {additional_notes}"
+                    existing_clients = row.get("clients", "").split(",") if row.get("clients") else []
+                    preselected = [c for c in existing_clients if (IS_ADMIN or c in ALLOWED)]
+                    new_clients = st.multiselect(
+                        "Assign to Client(s)",
+                        CLIENT_OPTIONS if IS_ADMIN else ALLOWED,
+                        preselected,
+                    )
 
-                    update_data = {
-                        "first_name": new_first,
-                        "last_name": new_last,
-                        "title": new_title,
-                        "company": new_company,
-                        "phone": new_phone,
-                        "email": new_email,
-                        "address": new_address,
-                        "website": new_website,
-                        "assigned_to_email": new_assigned_to,
-                        "follow_up_date": new_follow_up.strftime("%Y-%m-%d"),
-                        "clients": ",".join(new_clients),
-                        "notes": appended_notes,
-                    }
+                    st.text_area("Existing Notes", row.get("notes", ""), disabled=True)
+                    additional_notes = st.text_area("Notes (appended with date)", "")
+                    new_follow_up = st.date_input("Follow-Up Date", value=pd.to_datetime(row.get("follow_up_date")))
+                    updated = st.form_submit_button("Update Prospect")
 
-                    if "id" in row and pd.notnull(row["id"]):
+                    if updated:
+                        old_notes = row.get("notes")
+                        appended_notes = str(old_notes) if pd.notnull(old_notes) else ""
+                        if additional_notes:
+                            today_str = date.today().strftime("%Y-%m-%d")
+                            appended_notes += f"
+[{today_str}] {additional_notes}"
+
+                        safe_new_clients = new_clients if IS_ADMIN else [c for c in new_clients if c in ALLOWED]
+                        update_data = {
+                            "first_name": new_first,
+                            "last_name": new_last,
+                            "title": new_title,
+                            "company": new_company,
+                            "phone": new_phone,
+                            "email": new_email,
+                            "address": new_address,
+                            "website": new_website,
+                            "assigned_to_email": new_assigned_to,
+                            "follow_up_date": new_follow_up.strftime("%Y-%m-%d"),
+                            "clients": ",".join(safe_new_clients),
+                            "notes": appended_notes,
+                        }
+
+                        if "id" in row and pd.notnull(row["id"]):
+                            try:
+                                update_data["notes"] = str(update_data["notes"])
+                                resp = supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
+                                if getattr(resp, "data", None):
+                                    st.success("Prospect updated. Please reload the app to see changes.")
+
+                                    subject = f"Follow-Up Updated: {new_first} {new_last}"
+                                    body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
+                                    send_email(new_assigned_to, subject, body)
+                                else:
+                                    err = getattr(resp, "error", None)
+                                    st.error(f"Failed to update prospect. {err or 'No rows returned.'}")
+                            except Exception as e:
+                                st.error(f"Failed to update prospect: {e}")
+                        else:
+                            st.error("Prospect ID not found. Cannot update.")
+
+                if st.button("🗑️ Delete Prospect"):
+                    if row is not None and "id" in row and row["id"]:
                         try:
-                            update_data["notes"] = str(update_data["notes"])
-                            update_data["clients"] = ",".join(new_clients) if new_clients else ""
-                            resp = supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
-                            if getattr(resp, "data", None):
-                                st.success("Prospect updated. Please reload the app to see changes.")
-
-                                subject = f"Follow-Up Updated: {new_first} {new_last}"
-                                body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
-                                send_email(new_assigned_to, subject, body)
-                            else:
-                                err = getattr(resp, "error", None)
-                                st.error(f"Failed to update prospect. {err or 'No rows returned.'}")
+                            resp = supabase.table("prospects").delete().eq("id", row["id"]).execute()
+                            st.success("Prospect deleted. Please reload the app to see changes.")
                         except Exception as e:
-                            st.error(f"Failed to update prospect: {e}")
+                            st.error(f"Failed to delete prospect: {e}")
                     else:
-                        st.error("Prospect ID not found. Cannot update.")
-
-            if st.button("🗑️ Delete Prospect"):
-                if "id" in row and row["id"]:
-                    try:
-                        resp = supabase.table("prospects").delete().eq("id", row["id"]).execute()
-                        st.success("Prospect deleted. Please reload the app to see changes.")
-                    except Exception as e:
-                        st.error(f"Failed to delete prospect: {e}")
-                else:
-                    st.error("Prospect ID not found. Cannot delete.")
+                        st.error("Prospect ID not found. Cannot delete.")
     else:
         st.info("No prospects match the selected client(s).")
 else:
     st.info("No prospects found.")
 
 # === Reminders (Overdue+Next 7d, Once/Day, Batched by Recipient) ===
-from zoneinfo import ZoneInfo
-from collections import defaultdict
-
 REMINDER_WINDOW_DAYS = 7
-today = datetime.now(ZoneInfo("America/New_York")).date()
-window_end = today + timedelta(days=REMINDER_WINDOW_DAYS)
+_today = datetime.now(ZoneInfo("America/New_York")).date()
+window_end = _today + timedelta(days=REMINDER_WINDOW_DAYS)
 
 st.subheader("🔔 Follow-Ups: Overdue + Next 7 Days")
 
@@ -235,19 +325,18 @@ if not df.empty:
     due = df[df["follow_up_date"] <= window_end].copy()
 
     if not due.empty:
-        # Show table (helpful for on-screen awareness)
         st.warning("These follow-ups are overdue or due within the next 7 days:")
         st.table(due[["first_name", "last_name", "company", "follow_up_date", "assigned_to_email"]])
 
         # Exclude anything already reminded today (once/day gate)
-        due_needing_email = due[(due["last_reminded_on"] != today) | (due["last_reminded_on"].isna())].copy()
+        due_needing_email = due[(due["last_reminded_on"] != _today) | (due["last_reminded_on"].isna())].copy()
 
         # Group into digests by recipient
         batches = defaultdict(list)
         for _, r in due_needing_email.iterrows():
             recipient = (r.get("assigned_to_email") or "").strip()
             if recipient:
-                status = "OVERDUE" if r["follow_up_date"] < today else f"Due {r['follow_up_date']}"
+                status = "OVERDUE" if r["follow_up_date"] < _today else f"Due {r['follow_up_date']}"
                 line = f"- {r.get('first_name','')} {r.get('last_name','')} @ {r.get('company','')}  [{status}]"
                 batches[recipient].append({"id": r.get("id"), "line": line})
 
@@ -265,13 +354,14 @@ if not df.empty:
             subject = "Follow-Up Digest: Overdue & Upcoming (7 days)"
 
             try:
-                send_email(recipient, subject, "\n".join(body_lines))
+                send_email(recipient, subject, "
+".join(body_lines))
 
                 # Mark all those records as reminded today (so we don't resend on pings)
                 prospect_ids = [it["id"] for it in items if it["id"] is not None]
                 if prospect_ids:
                     supabase.table("prospects").update(
-                        {"last_reminded_on": today.isoformat()}
+                        {"last_reminded_on": _today.isoformat()}
                     ).in_("id", prospect_ids).execute()
 
             except Exception as e:
@@ -280,6 +370,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
