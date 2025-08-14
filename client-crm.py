@@ -189,60 +189,75 @@ if not df.empty:
 else:
     st.info("No prospects found.")
 
-# === Reminders ===
-from zoneinfo import ZoneInfo  # Python 3.9+
-REMINDER_WINDOW_DAYS = 7
+# === Reminders (Overdue+Next 7d, Once/Day, Batched by Recipient) ===
+from zoneinfo import ZoneInfo
+from collections import defaultdict
 
-# Use America/New_York to align "once per day" with your local day
+REMINDER_WINDOW_DAYS = 7
 today = datetime.now(ZoneInfo("America/New_York")).date()
 window_end = today + timedelta(days=REMINDER_WINDOW_DAYS)
 
-st.subheader("🔔 Follow-Ups Due Within 7 Days")
+st.subheader("🔔 Follow-Ups: Overdue + Next 7 Days")
 
 if not df.empty:
-    # Normalize dates
+    # Normalize
     df["follow_up_date"] = pd.to_datetime(df["follow_up_date"], errors="coerce").dt.date
-
-    # Ensure the column exists in the dataframe (may be null for most rows initially)
     if "last_reminded_on" not in df.columns:
         df["last_reminded_on"] = None
     else:
         df["last_reminded_on"] = pd.to_datetime(df["last_reminded_on"], errors="coerce").dt.date
 
-    # Only upcoming (today..+7); skip past-due to avoid daily nagging if you prefer
-    upcoming = df[
-        (df["follow_up_date"] >= today) & (df["follow_up_date"] <= window_end)
-    ].copy()
+    # Filter: overdue OR due within next 7 days
+    due = df[df["follow_up_date"] <= window_end].copy()
 
-    if not upcoming.empty:
-        st.warning("These follow-ups are due within the next 7 days:")
-        st.table(upcoming[["first_name", "last_name", "company", "follow_up_date"]])
+    if not due.empty:
+        # Show table (helpful for on-screen awareness)
+        st.warning("These follow-ups are overdue or due within the next 7 days:")
+        st.table(due[["first_name", "last_name", "company", "follow_up_date", "assigned_to_email"]])
 
-        # Send at most once per day per record
-        for _, row in upcoming.iterrows():
-            already_sent_today = (row.get("last_reminded_on") == today)
-            recipient = row.get("assigned_to_email")
-            prospect_id = row.get("id")
+        # Exclude anything already reminded today (once/day gate)
+        due_needing_email = due[(due["last_reminded_on"] != today) | (due["last_reminded_on"].isna())].copy()
 
-            if recipient and prospect_id and not already_sent_today:
-                subject = f"Follow-Up Reminder: {row.get('first_name', '')} {row.get('last_name', '')}"
-                body = (
-                    f"Reminder to follow up with {row.get('company','(Company)')} "
-                    f"on {row.get('follow_up_date')}"
-                )
-                try:
-                    send_email(recipient, subject, body)
+        # Group into digests by recipient
+        batches = defaultdict(list)
+        for _, row in due_needing_email.iterrows():
+            recipient = (row.get("assigned_to_email") or "").strip()
+            if recipient:
+                # Prepare a short line for the digest
+                status = "OVERDUE" if row["follow_up_date"] < today else f"Due {row['follow_up_date']}"
+                line = f"- {row.get('first_name','')} {row.get('last_name','')} @ {row.get('company','')}  [{status}]"
+                batches[recipient].append({"id": row.get("id"), "line": line})
 
-                    # Mark as reminded for today to suppress repeat sends
+        # Send one email per recipient, then mark all included records as reminded today
+        for recipient, items in batches.items():
+            if not items:
+                continue
+            body_lines = [
+                "Here are your follow-ups that are overdue or due within the next 7 days:",
+                "",
+                *[it["line"] for it in items],
+                "",
+                "— Client Prospect CRM"
+            ]
+            subject = "Follow-Up Digest: Overdue & Upcoming (7 days)"
+
+            try:
+                send_email(recipient, subject, "\n".join(body_lines))
+
+                # Mark all those records as reminded today (so we don't resend on pings)
+                prospect_ids = [it["id"] for it in items if it["id"] is not None]
+                if prospect_ids:
                     supabase.table("prospects").update(
                         {"last_reminded_on": today.isoformat()}
-                    ).eq("id", prospect_id).execute()
-                except Exception as e:
-                    st.error(f"Failed to send reminder for ID {prospect_id}: {e}")
+                    ).in_("id", prospect_ids).execute()
+
+            except Exception as e:
+                st.error(f"Failed to send digest to {recipient}: {e}")
     else:
-        st.success("No follow-ups due within the next 7 days!")
+        st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
