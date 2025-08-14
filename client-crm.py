@@ -19,6 +19,17 @@ EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# 🔐 Restore Supabase session across Streamlit reruns (prevents logout on UI interactions)
+if "sb_session" in st.session_state and st.session_state["sb_session"]:
+    try:
+        supabase.auth.set_session(
+            st.session_state["sb_session"].get("access_token"),
+            st.session_state["sb_session"].get("refresh_token"),
+        )
+    except Exception:
+        # If token expired/invalid, user can sign in again
+        pass
+
 st.set_page_config(page_title="Client Prospect CRM", layout="wide")
 st.title("📇 Multi-Client Prospect Tracker")
 
@@ -35,8 +46,15 @@ col_a, col_b = st.sidebar.columns(2)
 if col_a.button("Sign in"):
     try:
         auth_res = supabase.auth.sign_in_with_password({"email": email_login, "password": password_login})
-        st.session_state["session"] = getattr(auth_res, "session", None) or auth_res
+        sess = getattr(auth_res, "session", None) or auth_res
+        # Save tokens so auth survives Streamlit reruns
+        st.session_state["sb_session"] = {
+            "access_token": getattr(sess, "access_token", None),
+            "refresh_token": getattr(sess, "refresh_token", None),
+        }
+        st.session_state["session"] = sess
         st.success("Signed in.")
+        st.rerun()
     except Exception as e:
         st.error(f"Sign-in failed: {e}")
 if col_b.button("Sign out"):
@@ -45,7 +63,8 @@ if col_b.button("Sign out"):
     except Exception:
         pass
     st.session_state.pop("session", None)
-    st.experimental_rerun()
+    st.session_state.pop("sb_session", None)
+    st.rerun()
 
 # Helper to get current user email from session
 
@@ -54,7 +73,12 @@ def _current_user_email():
         sess_res = supabase.auth.get_session()
         session = getattr(sess_res, "session", None) or sess_res
         user = getattr(session, "user", None) if session else None
-        return getattr(user, "email", None)
+        email = getattr(user, "email", None)
+        if email:
+            return email
+        # Fallback
+        got = supabase.auth.get_user()
+        return getattr(getattr(got, "user", None), "email", None)
     except Exception:
         return None
 
@@ -66,7 +90,14 @@ def get_user_access():
     if not email:
         return {"email": None, "allowed_clients": [], "is_admin": False}
     try:
-        ua = supabase.table("user_access").select("allowed_clients,is_admin").eq("email", email).single().execute()
+        # Use ilike for case-insensitive email match
+        ua = (
+            supabase.table("user_access")
+            .select("allowed_clients,is_admin")
+            .ilike("email", email)
+            .single()
+            .execute()
+        )
         row = getattr(ua, "data", None) or {}
     except Exception:
         row = {}
@@ -255,7 +286,8 @@ if not df.empty:
                         appended_notes = str(old_notes) if pd.notnull(old_notes) else ""
                         if additional_notes:
                             today_str = date.today().strftime("%Y-%m-%d")
-                            appended_notes += f"[{today_str}] {additional_notes}"
+                            appended_notes += f"
+[{today_str}] {additional_notes}"
 
                         safe_new_clients = new_clients if IS_ADMIN else [c for c in new_clients if c in ALLOWED]
                         update_data = {
@@ -353,7 +385,8 @@ if not df.empty:
             subject = "Follow-Up Digest: Overdue & Upcoming (7 days)"
 
             try:
-                send_email(recipient, subject, "\n".join(body_lines))
+                send_email(recipient, subject, "
+".join(body_lines))
 
                 # Mark all those records as reminded today (so we don't resend on pings)
                 prospect_ids = [it["id"] for it in items if it["id"] is not None]
@@ -368,6 +401,8 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
+
 
 
 
