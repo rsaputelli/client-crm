@@ -46,7 +46,7 @@ def _find_logo():
 with header_left:
     _logo = _find_logo()
     if _logo:
-        st.image(_logo, width=300)
+        st.image(_logo, width=600)
     else:
         st.caption("(logo not found: assets/logo.png or logo.png)")
 with header_right:
@@ -422,6 +422,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
