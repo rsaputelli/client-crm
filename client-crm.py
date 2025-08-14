@@ -44,11 +44,11 @@ def send_email(to_address, subject, body):
 # === Live Usage Summary ===
 try:
     count_res = supabase.table("prospects").select("id", count="exact").execute()
-    row_count = count_res.count or 0
+    row_count = getattr(count_res, "count", 0) or 0
     st.sidebar.markdown(f"### 📊 Total Prospects: {row_count}")
     if row_count > 18000:
         st.sidebar.warning("⚠️ Approaching Supabase Free Tier limit (20,000 rows)")
-except Exception as e:
+except Exception:
     st.sidebar.error("Could not fetch prospect count")
 
 # === Form to Add New Prospect ===
@@ -83,11 +83,15 @@ with st.sidebar.form("add_prospect"):
             "notes": notes,
             "clients": ",".join(clients)
         }
-        response = supabase.table("prospects").insert(data).execute()
-        if response.status_code == 201:
-            st.success("Prospect added successfully!")
-        else:
-            st.error("Failed to add prospect. Please check your fields.")
+        try:
+            resp = supabase.table("prospects").insert(data).execute()
+            if getattr(resp, "data", None):
+                st.success("Prospect added successfully!")
+            else:
+                err = getattr(resp, "error", None)
+                st.error(f"Failed to add prospect. {err or 'No rows returned.'}")
+        except Exception as e:
+            st.error(f"Failed to add prospect: {e}")
 
 # === Upload CSV ===
 st.sidebar.header("📄 Upload Prospects CSV")
@@ -100,14 +104,22 @@ if uploaded_file:
         df_upload.drop(columns=["notes"], inplace=True)
     df_upload = df_upload.where(pd.notnull(df_upload), None)
     try:
-        supabase.table("prospects").insert(df_upload.to_dict(orient="records")).execute()
-        st.success("CSV uploaded and processed successfully.")
+        resp = supabase.table("prospects").insert(df_upload.to_dict(orient="records")).execute()
+        if getattr(resp, "data", None):
+            st.success("CSV uploaded and processed successfully.")
+        else:
+            err = getattr(resp, "error", None)
+            st.error(f"CSV upload failed. {err or 'No rows returned.'}")
     except Exception as e:
         st.error(f"CSV upload failed: {e}")
 
 # === Load, Display, Edit, and Delete Prospects ===
-data = supabase.table("prospects").select("*").execute()
-df = pd.DataFrame(data.data)
+try:
+    data = supabase.table("prospects").select("*").execute()
+    df = pd.DataFrame(getattr(data, "data", []) or [])
+except Exception as e:
+    st.error(f"Failed to load prospects: {e}")
+    df = pd.DataFrame()
 
 filter_clients = st.multiselect("Filter by Client", CLIENT_OPTIONS)
 if not df.empty:
@@ -118,7 +130,8 @@ if not df.empty:
 
     if not df.empty:
         with st.expander("📋 View All Prospects", expanded=True):
-            st.dataframe(df.drop(columns=["id"]))
+            safe_cols = [c for c in df.columns if c != "id"]
+            st.dataframe(df[safe_cols])
 
             selected = st.selectbox("Select a prospect to edit or delete", df["email"])
             row = df[df["email"] == selected].iloc[0]
@@ -126,19 +139,23 @@ if not df.empty:
             st.markdown("---")
             st.subheader("✏️ Edit Prospect")
             with st.form("edit_prospect"):
-                new_first = st.text_input("First Name", row["first_name"])
-                new_last = st.text_input("Last Name", row["last_name"])
-                new_title = st.text_input("Title", row["title"])
-                new_company = st.text_input("Company", row["company"])
-                new_phone = st.text_input("Phone", row["phone"])
-                new_email = st.text_input("Email", row["email"])
-                new_address = st.text_area("Address", row["address"])
-                new_website = st.text_input("Website", row["website"])
-                new_assigned_to = st.text_input("Assigned To (Email)", row["assigned_to_email"])
-                new_clients = st.multiselect("Assign to Client(s)", CLIENT_OPTIONS, row.get("clients", "").split(",") if row.get("clients") else [])
+                new_first = st.text_input("First Name", row.get("first_name", ""))
+                new_last = st.text_input("Last Name", row.get("last_name", ""))
+                new_title = st.text_input("Title", row.get("title", ""))
+                new_company = st.text_input("Company", row.get("company", ""))
+                new_phone = st.text_input("Phone", row.get("phone", ""))
+                new_email = st.text_input("Email", row.get("email", ""))
+                new_address = st.text_area("Address", row.get("address", ""))
+                new_website = st.text_input("Website", row.get("website", ""))
+                new_assigned_to = st.text_input("Assigned To (Email)", row.get("assigned_to_email", ""))
+                new_clients = st.multiselect(
+                    "Assign to Client(s)",
+                    CLIENT_OPTIONS,
+                    row.get("clients", "").split(",") if row.get("clients") else []
+                )
                 st.text_area("Existing Notes", row.get("notes", ""), disabled=True)
                 additional_notes = st.text_area("Notes (appended with date)", "")
-                new_follow_up = st.date_input("Follow-Up Date", value=pd.to_datetime(row["follow_up_date"]))
+                new_follow_up = st.date_input("Follow-Up Date", value=pd.to_datetime(row.get("follow_up_date")))
                 updated = st.form_submit_button("Update Prospect")
 
                 if updated:
@@ -160,19 +177,23 @@ if not df.empty:
                         "assigned_to_email": new_assigned_to,
                         "follow_up_date": new_follow_up.strftime("%Y-%m-%d"),
                         "clients": ",".join(new_clients),
-                        "notes": appended_notes
+                        "notes": appended_notes,
                     }
 
                     if "id" in row and pd.notnull(row["id"]):
                         try:
                             update_data["notes"] = str(update_data["notes"])
                             update_data["clients"] = ",".join(new_clients) if new_clients else ""
-                            supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
-                            st.success("Prospect updated. Please reload the app to see changes.")
+                            resp = supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
+                            if getattr(resp, "data", None):
+                                st.success("Prospect updated. Please reload the app to see changes.")
 
-                            subject = f"Follow-Up Updated: {new_first} {new_last}"
-                            body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
-                            send_email(new_assigned_to, subject, body)
+                                subject = f"Follow-Up Updated: {new_first} {new_last}"
+                                body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
+                                send_email(new_assigned_to, subject, body)
+                            else:
+                                err = getattr(resp, "error", None)
+                                st.error(f"Failed to update prospect. {err or 'No rows returned.'}")
                         except Exception as e:
                             st.error(f"Failed to update prospect: {e}")
                     else:
@@ -180,8 +201,11 @@ if not df.empty:
 
             if st.button("🗑️ Delete Prospect"):
                 if "id" in row and row["id"]:
-                    supabase.table("prospects").delete().eq("id", row["id"]).execute()
-                    st.success("Prospect deleted. Please reload the app to see changes.")
+                    try:
+                        resp = supabase.table("prospects").delete().eq("id", row["id"]).execute()
+                        st.success("Prospect deleted. Please reload the app to see changes.")
+                    except Exception as e:
+                        st.error(f"Failed to delete prospect: {e}")
                 else:
                     st.error("Prospect ID not found. Cannot delete.")
     else:
@@ -220,13 +244,12 @@ if not df.empty:
 
         # Group into digests by recipient
         batches = defaultdict(list)
-        for _, row in due_needing_email.iterrows():
-            recipient = (row.get("assigned_to_email") or "").strip()
+        for _, r in due_needing_email.iterrows():
+            recipient = (r.get("assigned_to_email") or "").strip()
             if recipient:
-                # Prepare a short line for the digest
-                status = "OVERDUE" if row["follow_up_date"] < today else f"Due {row['follow_up_date']}"
-                line = f"- {row.get('first_name','')} {row.get('last_name','')} @ {row.get('company','')}  [{status}]"
-                batches[recipient].append({"id": row.get("id"), "line": line})
+                status = "OVERDUE" if r["follow_up_date"] < today else f"Due {r['follow_up_date']}"
+                line = f"- {r.get('first_name','')} {r.get('last_name','')} @ {r.get('company','')}  [{status}]"
+                batches[recipient].append({"id": r.get("id"), "line": line})
 
         # Send one email per recipient, then mark all included records as reminded today
         for recipient, items in batches.items():
@@ -237,7 +260,7 @@ if not df.empty:
                 "",
                 *[it["line"] for it in items],
                 "",
-                "— Client Prospect CRM"
+                "— Client Prospect CRM",
             ]
             subject = "Follow-Up Digest: Overdue & Upcoming (7 days)"
 
@@ -257,6 +280,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
