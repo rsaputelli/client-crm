@@ -30,16 +30,18 @@ if "sb_session" in st.session_state and st.session_state["sb_session"]:
         # If token expired/invalid, user can sign in again
         pass
 
-st.set_page_config(page_title="Client Prospect CRM",
-                   page_icon="assets/logo.png",  # favicon
-                   layout="wide")
+# === Page config + Branding ===
+st.set_page_config(page_title="Client Prospect CRM", page_icon="assets/logo.png", layout="wide")
 
-# Replace the plain title with a logo+title header
-left, right = st.columns([1, 8])
-with left:
-    st.image("assets/logo.png", width=56)
-with right:
-    st.markdown("## Multi-Client Prospect Tracker")
+# Header with logo + title
+header_left, header_right = st.columns([1, 8])
+with header_left:
+    try:
+        st.image("assets/logo.png", width=56)
+    except Exception:
+        pass  # if logo missing, continue without error
+with header_right:
+    st.markdown("## Lutine Management Multi-Client Prospect Tracker")
 
 CLIENT_OPTIONS = [
     "WOEMA", "SCAAP", "CTAAP", "NJAFP", "DAFP", "MAFP", "HAFP",
@@ -407,6 +409,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
