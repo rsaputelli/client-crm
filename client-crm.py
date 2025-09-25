@@ -54,7 +54,7 @@ with header_right:
 
 CLIENT_OPTIONS = [
     "WOEMA", "SCAAP", "CTAAP", "NJAFP", "DAFP", "MAFP", "HAFP",
-    "PAACP", "DEACP", "ACPNJ", "NSSA", "SEMPA", "WAPA"
+    "PAACP", "DEACP", "ACPNJ", "NSSA", "SEMPA", "WAPA", "NHCMA"
 ]
 
 # Optional: sidebar logo
@@ -422,6 +422,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
