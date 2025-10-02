@@ -6,6 +6,7 @@ Should be scheduled (daily/weekly) via cron, GitHub Actions, or Supabase Edge Fu
 """
 
 import os
+import sys
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 from collections import defaultdict
@@ -24,6 +25,28 @@ EMAIL_USER = os.environ["EMAIL_USER"]
 EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+from datetime import datetime
+import sys
+
+# --- Fetch reminder frequency from Supabase ---
+try:
+    res = supabase.table("reminder_settings").select("frequency").single().execute()
+    frequency = (res.data or {}).get("frequency", "daily")
+except Exception:
+    frequency = "daily"  # fallback default
+
+# --- Apply frequency rules ---
+if frequency == "off":
+    print("Reminders disabled by admin.")
+    sys.exit(0)
+
+# Weekly = only run on Mondays (weekday 0)
+if frequency == "weekly" and datetime.today().weekday() != 0:
+    print("Weekly reminders only fire on Monday.")
+    sys.exit(0)
+
+print(f"Reminder frequency is '{frequency}' → proceeding to send reminders…")
 
 # === Email sending helper ===
 def send_email(to_address, subject, body):
