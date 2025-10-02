@@ -1,5 +1,4 @@
-[README_CRM_Reminders.md](https://github.com/user-attachments/files/22670067/README_CRM_Reminders.md)
-# Client Prospect CRM — Reminder System Guide
+[README_CRM_Reminders (2).md](https://github.com/user-attachments/files/22670139/README_CRM_Reminders.2.md)[Uploading READ# Client Prospect CRM — Reminder System Guide
 
 This document explains how reminder emails are configured, scheduled, and controlled from the Streamlit app and GitHub Actions.
 
@@ -193,3 +192,44 @@ python-dateutil
 - `v2`: Moved to scheduled job; UI shows follow‑ups only.
 - `v3`: Added Admin UI for frequency; job reads `reminder_settings`.
 - `v4`: Service role key + diagnostics logging + Office365 SMTP guidance.
+
+
+---
+
+## Ops Runbook (Quick Reference)
+
+### Rotate SMTP Credentials
+1. Generate new credentials with your provider (e.g., new App Password in Office365).
+2. Go to GitHub → Repo → Settings → Secrets and variables → Actions.
+3. Update:
+   - `EMAIL_USER`
+   - `EMAIL_PASSWORD`
+   - (if host/port changed) `EMAIL_HOST`, `EMAIL_PORT`
+4. Re-run workflow manually to confirm.
+
+### Pause Reminders (e.g., for holiday week)
+- In the app (Admin sidebar) → Reminder Settings → set frequency to **off**.
+- Confirm next workflow run prints: `Reminders disabled by admin.`
+
+### Switch to Weekly Mode
+- In the app → Reminder Settings → set frequency to **weekly**.
+- Workflow will continue running daily, but will only send on **Mondays**.
+
+### Send a One-Off Digest (test)
+1. In Supabase SQL editor, clear suppression for one prospect:
+   ```sql
+   update prospects
+   set last_reminded_on = null, follow_up_date = current_date
+   where id = <your_id>;
+   ```
+2. Trigger workflow manually (Actions → Send CRM Reminders → Run workflow).  
+3. Check logs → should show “Sent digest to …”.
+
+### Investigate a Missed Reminder
+- Check the app’s **Follow-Ups (UI only)**: are items showing?  
+- If not, no reminders are due.  
+- If yes, check `assigned_to_email` is filled.  
+- In GitHub Action logs: look for counts (due, due needing email).  
+- If still unclear: query Supabase directly for `follow_up_date` and `last_reminded_on`.  
+
+ME_CRM_Reminders (2).md…]()
