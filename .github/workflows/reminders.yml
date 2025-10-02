@@ -19,6 +19,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
           EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
