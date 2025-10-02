@@ -320,22 +320,52 @@ col_xlsx.download_button(
     use_container_width=True,
 )
 
-# === Display, Edit, Delete using the filtered frame ===
+# === Display, Search, Edit, Delete using the filtered frame ===
+def _label_from_row(r):
+    fn = (r.get("first_name") or "").strip()
+    ln = (r.get("last_name") or "").strip()
+    comp = (r.get("company") or "").strip()
+    nm = f"{fn} {ln}".strip() or "(no name)"
+    return f"{nm} — {comp}" if comp else nm
+
 if not df_filtered.empty:
     with st.expander("📋 View Prospects", expanded=True):
-        st.dataframe(export_df)  # safe cols already applied
+        # ---- Search box filters view by first/last/company ----
+        search = st.text_input("Search name or company")
+        df_view = df_filtered.copy()
+        if search:
+            s = search.strip().lower()
+            # Coerce missing cols
+            for c in ["first_name", "last_name", "company"]:
+                if c not in df_view.columns:
+                    df_view[c] = ""
+            df_view = df_view[df_view[["first_name", "last_name", "company"]]
+                              .astype(str).apply(lambda r: any(s in v.lower() for v in r), axis=1)]
+        st.dataframe(export_df if df_view is df_filtered else df_view[[c for c in export_df.columns if c in df_view.columns]])
 
-        # Protect against empty selection list
-        try:
-            sel_emails = df_filtered["email"].dropna().unique().tolist()
-            if sel_emails:
-                selected = st.selectbox("Select a prospect to edit or delete", sel_emails)
-                row = df_filtered[df_filtered["email"] == selected].iloc[0]
-            else:
-                row = None
-        except Exception:
-            st.info("No selectable rows.")
-            row = None
+        # ---- Build compact selection list (labels -> id) ----
+        options = []
+        if "id" in df_view.columns:
+            for _, rr in df_view.iterrows():
+                if pd.notnull(rr.get("id")):
+                    options.append((_label_from_row(rr), rr["id"]))
+
+        labels = [lbl for (lbl, _id) in options]
+        ids = [_id for (lbl, _id) in options]
+
+        # Sticky selected id
+        sel_id = st.session_state.get("selected_id")
+        if sel_id in ids:
+            idx = ids.index(sel_id)
+        else:
+            idx = 0 if ids else None
+
+        row = None
+        if ids:
+            chosen_label = st.selectbox("Select a prospect", labels, index=idx if idx is not None else None)
+            sel_id = ids[labels.index(chosen_label)]
+            st.session_state["selected_id"] = sel_id
+            row = df_view[df_view["id"] == sel_id].iloc[0]
 
         if row is not None:
             st.markdown("---")
@@ -362,10 +392,18 @@ if not df_filtered.empty:
 
                 st.text_area("Existing Notes", row.get("notes", ""), disabled=True)
                 additional_notes = st.text_area("Notes (appended with date)", "")
-                # follow_up_date might be string; coerce to date input
-                fu_val = pd.to_datetime(row.get("follow_up_date"), errors="coerce")
-                fu_val = fu_val.date() if pd.notnull(fu_val) else datetime.today().date()
-                new_follow_up = st.date_input("Follow-Up Date", value=fu_val)
+
+                # ---- No follow-up date toggle ----
+                raw_fu = row.get("follow_up_date")
+                has_no_date = pd.isna(raw_fu) or str(raw_fu).strip() in ("", "None", "NaT")
+                no_fu = st.checkbox("No follow-up date", value=has_no_date)
+                if no_fu:
+                    fu_input = None
+                else:
+                    fu_val = pd.to_datetime(raw_fu, errors="coerce")
+                    fu_val = fu_val.date() if pd.notnull(fu_val) else datetime.today().date()
+                    fu_input = st.date_input("Follow-Up Date", value=fu_val)
+
                 updated = st.form_submit_button("Update Prospect")
 
                 if updated:
@@ -386,7 +424,7 @@ if not df_filtered.empty:
                         "address": new_address,
                         "website": new_website,
                         "assigned_to_email": new_assigned_to,
-                        "follow_up_date": new_follow_up.strftime("%Y-%m-%d"),
+                        "follow_up_date": (None if no_fu else fu_input.strftime("%Y-%m-%d")),
                         "clients": ",".join(safe_new_clients),
                         "notes": appended_notes,
                     }
@@ -396,11 +434,12 @@ if not df_filtered.empty:
                             update_data["notes"] = str(update_data["notes"])
                             resp = supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
                             if getattr(resp, "data", None):
-                                st.success("Prospect updated. Please reload the app to see changes.")
-
+                                st.success("Prospect updated.")
+                                # Keep selection sticky: do NOT change st.session_state["selected_id"]
                                 subject = f"Follow-Up Updated: {new_first} {new_last}"
-                                body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
-                                send_email(new_assigned_to, subject, body)
+                                body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {(fu_input if fu_input else 'No Date')}."
+                                if new_assigned_to:
+                                    send_email(new_assigned_to, subject, body)
                             else:
                                 err = getattr(resp, "error", None)
                                 st.error(f"Failed to update prospect. {err or 'No rows returned.'}")
@@ -413,7 +452,7 @@ if not df_filtered.empty:
                 if row is not None and "id" in row and row["id"]:
                     try:
                         resp = supabase.table("prospects").delete().eq("id", row["id"]).execute()
-                        st.success("Prospect deleted. Please reload the app to see changes.")
+                        st.success("Prospect deleted. You may need to reload to see it removed from the list.")
                     except Exception as e:
                         st.error(f"Failed to delete prospect: {e}")
                 else:
@@ -484,3 +523,5 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
+
