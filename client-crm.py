@@ -4,8 +4,8 @@ import pandas as pd
 from supabase import create_client, Client
 from datetime import datetime, timedelta, date
 import smtplib
-from email.mime_text import MIMEText
-from email.mime_multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from zoneinfo import ZoneInfo
 from collections import defaultdict
 import os
@@ -527,6 +527,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
