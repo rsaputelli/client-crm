@@ -4,8 +4,8 @@ import pandas as pd
 from supabase import create_client, Client
 from datetime import datetime, timedelta, date
 import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from email.mime_text import MIMEText
+from email.mime_multipart import MIMEMultipart
 from zoneinfo import ZoneInfo
 from collections import defaultdict
 import os
@@ -350,22 +350,25 @@ if not df_filtered.empty:
                 if pd.notnull(rr.get("id")):
                     options.append((_label_from_row(rr), rr["id"]))
 
-        labels = [lbl for (lbl, _id) in options]
-        ids = [_id for (lbl, _id) in options]
+        # Sticky selection by ID (order-safe)
+        label_by_id = { _id: lbl for (lbl, _id) in options }
+        ids = list(label_by_id.keys())
 
-        # Sticky selected id
-        sel_id = st.session_state.get("selected_id")
-        if sel_id in ids:
-            idx = ids.index(sel_id)
-        else:
-            idx = 0 if ids else None
+        current_id = st.session_state.get("selected_id")
+        if current_id not in label_by_id and ids:
+            current_id = ids[0]
 
-        row = None
         if ids:
-            chosen_label = st.selectbox("Select a prospect", labels, index=idx if idx is not None else None)
-            sel_id = ids[labels.index(chosen_label)]
-            st.session_state["selected_id"] = sel_id
-            row = df_view[df_view["id"] == sel_id].iloc[0]
+            selected_id = st.selectbox(
+                "Select a prospect",
+                options=ids,
+                index=(ids.index(current_id) if current_id in ids else 0),
+                format_func=lambda _id: label_by_id.get(_id, f"ID {_id}"),
+                key="selected_id",
+            )
+            row = df_view[df_view["id"] == selected_id].iloc[0]
+        else:
+            row = None
 
         if row is not None:
             st.markdown("---")
@@ -435,7 +438,8 @@ if not df_filtered.empty:
                             resp = supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
                             if getattr(resp, "data", None):
                                 st.success("Prospect updated.")
-                                # Keep selection sticky: do NOT change st.session_state["selected_id"]
+                                # Keep the same selection; avoid st.rerun()
+                                st.session_state["selected_id"] = row["id"]
                                 subject = f"Follow-Up Updated: {new_first} {new_last}"
                                 body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {(fu_input if fu_input else 'No Date')}."
                                 if new_assigned_to:
@@ -523,5 +527,6 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
