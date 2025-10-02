@@ -9,6 +9,7 @@ from email.mime.multipart import MIMEMultipart
 from zoneinfo import ZoneInfo
 from collections import defaultdict
 import os
+from io import BytesIO
 
 # ✅ Page config MUST be the first Streamlit call or favicon/logo can be ignored
 st.set_page_config(page_title="Client Prospect CRM", page_icon="logo.png", layout="wide")
@@ -90,7 +91,6 @@ if col_b.button("Sign out"):
     st.rerun()
 
 # Helper to get current user email from session
-
 def _current_user_email():
     try:
         sess_res = supabase.auth.get_session()
@@ -106,14 +106,12 @@ def _current_user_email():
         return None
 
 # ---- Access helpers (UI convenience; RLS is the real gate) ----
-
 def get_user_access():
     """Return dict(email, allowed_clients, is_admin). Requires authenticated session."""
     email = _current_user_email()
     if not email:
         return {"email": None, "allowed_clients": [], "is_admin": False}
     try:
-        # Use ilike for case-insensitive email match
         ua = (
             supabase.table("user_access")
             .select("allowed_clients,is_admin")
@@ -140,7 +138,6 @@ if USER_EMAIL is None:
     st.stop()
 
 # === Function to Send Email ===
-
 def send_email(to_address, subject, body):
     msg = MIMEMultipart()
     msg['From'] = EMAIL_USER
@@ -238,7 +235,7 @@ if uploaded_file:
     except Exception as e:
         st.error(f"CSV upload failed: {e}")
 
-# === Load, Display, Edit, and Delete Prospects ===
+# === Load Prospects ===
 try:
     data = supabase.table("prospects").select("*").execute()
     df = pd.DataFrame(getattr(data, "data", []) or [])
@@ -246,25 +243,24 @@ except Exception as e:
     st.error(f"Failed to load prospects: {e}")
     df = pd.DataFrame()
 
-# UI filter choices limited by role
+# === Filters (Client + Owner) & Export ===
 client_choices = CLIENT_OPTIONS if IS_ADMIN else ALLOWED
 filter_clients = st.multiselect(
     "Filter by Client",
     client_choices,
-    default=([] if IS_ADMIN else ALLOWED)
+    default=([] if IS_ADMIN else ALLOWED),
 )
 
-from io import BytesIO
-
-# --- Export & Owner Filter block (inserted) ---
-# Start from base df and enforce non-admin restriction first
+# Base frame with non-admin restriction applied first
 base_df = df.copy()
 if not IS_ADMIN and not base_df.empty:
+    # clients stored as comma-separated string; treat missing as ""
+    base_df["clients"] = base_df["clients"].fillna("")
     base_df = base_df[base_df["clients"].apply(
-        lambda x: any(c in x for c in ALLOWED) if isinstance(x, (str, list)) else False
+        lambda x: any(c in [v.strip() for v in str(x).split(",")] for c in ALLOWED)
     )]
 
-# Owner choices limited to what current user can see
+# Owner choices based on allowed rows
 owner_choices = []
 if not base_df.empty and "assigned_to_email" in base_df.columns:
     owner_choices = sorted(base_df["assigned_to_email"].dropna().unique().tolist())
@@ -275,166 +271,155 @@ filter_owners = st.multiselect(
     default=[],
 )
 
-# Build the filtered frame used for BOTH display and export
+# Build filtered frame used for BOTH display and export
 df_filtered = base_df
 
-# Client filter (handles string or list in `clients`)
-# if filter_clients:
-#     df_filtered = df_filtered[df_filtered["clients"].apply(
-#         lambda x: any(c in (x if isinstance(x, list) else [x]) for c in filter_clients) if isinstance(x, (str, list)) else False
-#     )]
-# 
-# # Owner filter
-# if filter_owners:
-#     df_filtered = df_filtered[df_filtered["assigned_to_email"].isin(filter_owners)]
-# 
-# # Optional: normalize / sort by follow_up_date
-# if not df_filtered.empty and "follow_up_date" in df_filtered.columns:
-#     if not pd.api.types.is_datetime64_any_dtype(df_filtered["follow_up_date"]):
-#         df_filtered["follow_up_date"] = pd.to_datetime(df_filtered["follow_up_date"], errors="coerce")
-#     df_filtered = df_filtered.sort_values(by="follow_up_date", na_position="last")
-# 
-# # Prepare export (exclude internal id)
-# safe_cols = [c for c in df_filtered.columns if c != "id"]
-# export_df = df_filtered[safe_cols].copy()
-# 
-# st.markdown("#### ⬇️ Export filtered prospects")
-# col_csv, col_xlsx = st.columns(2)
-# 
-# # CSV
-# csv_bytes = export_df.to_csv(index=False).encode("utf-8")
-# col_csv.download_button(
-#     "Download CSV",
-#     data=csv_bytes,
-#     file_name="prospects_filtered.csv",
-#     mime="text/csv",
-#     use_container_width=True,
-# )
-# 
-# # XLSX
-# xlsx_buffer = BytesIO()
-# with pd.ExcelWriter(xlsx_buffer) as writer:
-#     export_df.to_excel(writer, index=False, sheet_name="Prospects")
-# xlsx_buffer.seek(0)
-# col_xlsx.download_button(
-#     "Download Excel (.xlsx)",
-#     data=xlsx_buffer,
-#     file_name="prospects_filtered.xlsx",
-#     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-#     use_container_width=True,
-# )
-# 
-# # IMPORTANT for downstream: use `df_filtered` as the display dataframe
-# # e.g., st.dataframe(df_filtered), not the original `df`.
-# ,
-# )
-# 
-# if not df.empty:
-#     # Hard-limit non-admin view to allowed clients (belt-and-suspenders; RLS should also enforce)
-# #     if not IS_ADMIN:
-# #         df = df[df["clients"].apply(lambda x: any(c in x for c in ALLOWED) if isinstance(x, str) else False)]
-# # 
-# #     
-# # Apply selected filter
-#     if filter_clients:
-#         df = df[df["clients"].apply(lambda x: any(client in x for client in filter_clients) if isinstance(x, str) else False)]
-# 
-#     
-if not df.empty:
-        df = df.sort_values(by="follow_up_date")
-        with st.expander("📋 View All Prospects", expanded=True):
-            safe_cols = [c for c in df.columns if c != "id"]
-            st.dataframe(df[safe_cols])
+# Apply client filter
+if filter_clients:
+    df_filtered = df_filtered.copy()
+    df_filtered["clients"] = df_filtered["clients"].fillna("")
+    df_filtered = df_filtered[df_filtered["clients"].apply(
+        lambda x: any(c in [v.strip() for v in str(x).split(",")] for c in filter_clients)
+    )]
 
-            # Protect against empty selection list
-            try:
-                selected = st.selectbox("Select a prospect to edit or delete", df["email"])
-                row = df[df["email"] == selected].iloc[0]
-            except Exception:
-                st.info("No selectable rows.")
+# Apply owner filter
+if filter_owners:
+    df_filtered = df_filtered[df_filtered["assigned_to_email"].isin(filter_owners)]
+
+# Sort by follow_up_date if present
+if not df_filtered.empty and "follow_up_date" in df_filtered.columns:
+    if not pd.api.types.is_datetime64_any_dtype(df_filtered["follow_up_date"]):
+        df_filtered["follow_up_date"] = pd.to_datetime(df_filtered["follow_up_date"], errors="coerce")
+    df_filtered = df_filtered.sort_values(by="follow_up_date", na_position="last")
+
+# Export buttons
+safe_cols = [c for c in df_filtered.columns if c != "id"]
+export_df = df_filtered[safe_cols].copy()
+
+st.markdown("#### ⬇️ Export filtered prospects")
+col_csv, col_xlsx = st.columns(2)
+
+csv_bytes = export_df.to_csv(index=False).encode("utf-8")
+col_csv.download_button(
+    "Download CSV",
+    data=csv_bytes,
+    file_name="prospects_filtered.csv",
+    mime="text/csv",
+    use_container_width=True,
+)
+
+xlsx_buffer = BytesIO()
+with pd.ExcelWriter(xlsx_buffer) as writer:
+    export_df.to_excel(writer, index=False, sheet_name="Prospects")
+xlsx_buffer.seek(0)
+col_xlsx.download_button(
+    "Download Excel (.xlsx)",
+    data=xlsx_buffer,
+    file_name="prospects_filtered.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    use_container_width=True,
+)
+
+# === Display, Edit, Delete using the filtered frame ===
+if not df_filtered.empty:
+    with st.expander("📋 View Prospects", expanded=True):
+        st.dataframe(export_df)  # safe cols already applied
+
+        # Protect against empty selection list
+        try:
+            sel_emails = df_filtered["email"].dropna().unique().tolist()
+            if sel_emails:
+                selected = st.selectbox("Select a prospect to edit or delete", sel_emails)
+                row = df_filtered[df_filtered["email"] == selected].iloc[0]
+            else:
                 row = None
+        except Exception:
+            st.info("No selectable rows.")
+            row = None
 
-            if row is not None:
-                st.markdown("---")
-                st.subheader("✏️ Edit Prospect")
-                with st.form("edit_prospect"):
-                    new_first = st.text_input("First Name", row.get("first_name", ""))
-                    new_last = st.text_input("Last Name", row.get("last_name", ""))
-                    new_title = st.text_input("Title", row.get("title", ""))
-                    new_company = st.text_input("Company", row.get("company", ""))
-                    new_phone = st.text_input("Phone", row.get("phone", ""))
-                    new_email = st.text_input("Email", row.get("email", ""))
-                    new_address = st.text_area("Address", row.get("address", ""))
-                    new_website = st.text_input("Website", row.get("website", ""))
-                    new_assigned_to = st.text_input("Assigned To (Email)", row.get("assigned_to_email", ""))
+        if row is not None:
+            st.markdown("---")
+            st.subheader("✏️ Edit Prospect")
+            with st.form("edit_prospect"):
+                new_first = st.text_input("First Name", row.get("first_name", ""))
+                new_last = st.text_input("Last Name", row.get("last_name", ""))
+                new_title = st.text_input("Title", row.get("title", ""))
+                new_company = st.text_input("Company", row.get("company", ""))
+                new_phone = st.text_input("Phone", row.get("phone", ""))
+                new_email = st.text_input("Email", row.get("email", ""))
+                new_address = st.text_area("Address", row.get("address", ""))
+                new_website = st.text_input("Website", row.get("website", ""))
+                new_assigned_to = st.text_input("Assigned To (Email)", row.get("assigned_to_email", ""))
 
-                    existing_clients = row.get("clients", "").split(",") if row.get("clients") else []
-                    preselected = [c for c in existing_clients if (IS_ADMIN or c in ALLOWED)]
-                    new_clients = st.multiselect(
-                        "Assign to Client(s)",
-                        CLIENT_OPTIONS if IS_ADMIN else ALLOWED,
-                        preselected,
-                    )
+                existing_clients = row.get("clients", "")
+                existing_list = [v.strip() for v in existing_clients.split(",")] if existing_clients else []
+                preselected = [c for c in existing_list if (IS_ADMIN or c in ALLOWED)]
+                new_clients = st.multiselect(
+                    "Assign to Client(s)",
+                    CLIENT_OPTIONS if IS_ADMIN else ALLOWED,
+                    preselected,
+                )
 
-                    st.text_area("Existing Notes", row.get("notes", ""), disabled=True)
-                    additional_notes = st.text_area("Notes (appended with date)", "")
-                    new_follow_up = st.date_input("Follow-Up Date", value=pd.to_datetime(row.get("follow_up_date")))
-                    updated = st.form_submit_button("Update Prospect")
+                st.text_area("Existing Notes", row.get("notes", ""), disabled=True)
+                additional_notes = st.text_area("Notes (appended with date)", "")
+                # follow_up_date might be string; coerce to date input
+                fu_val = pd.to_datetime(row.get("follow_up_date"), errors="coerce")
+                fu_val = fu_val.date() if pd.notnull(fu_val) else datetime.today().date()
+                new_follow_up = st.date_input("Follow-Up Date", value=fu_val)
+                updated = st.form_submit_button("Update Prospect")
 
-                    if updated:
-                        old_notes = row.get("notes")
-                        appended_notes = str(old_notes) if pd.notnull(old_notes) else ""
-                        if additional_notes:
-                            today_str = date.today().strftime("%Y-%m-%d")
-                            appended_notes += f"[{today_str}] {additional_notes}"
+                if updated:
+                    old_notes = row.get("notes")
+                    appended_notes = str(old_notes) if pd.notnull(old_notes) else ""
+                    if additional_notes:
+                        today_str = date.today().strftime("%Y-%m-%d")
+                        appended_notes += f"[{today_str}] {additional_notes}"
 
-                        safe_new_clients = new_clients if IS_ADMIN else [c for c in new_clients if c in ALLOWED]
-                        update_data = {
-                            "first_name": new_first,
-                            "last_name": new_last,
-                            "title": new_title,
-                            "company": new_company,
-                            "phone": new_phone,
-                            "email": new_email,
-                            "address": new_address,
-                            "website": new_website,
-                            "assigned_to_email": new_assigned_to,
-                            "follow_up_date": new_follow_up.strftime("%Y-%m-%d"),
-                            "clients": ",".join(safe_new_clients),
-                            "notes": appended_notes,
-                        }
+                    safe_new_clients = new_clients if IS_ADMIN else [c for c in new_clients if c in ALLOWED]
+                    update_data = {
+                        "first_name": new_first,
+                        "last_name": new_last,
+                        "title": new_title,
+                        "company": new_company,
+                        "phone": new_phone,
+                        "email": new_email,
+                        "address": new_address,
+                        "website": new_website,
+                        "assigned_to_email": new_assigned_to,
+                        "follow_up_date": new_follow_up.strftime("%Y-%m-%d"),
+                        "clients": ",".join(safe_new_clients),
+                        "notes": appended_notes,
+                    }
 
-                        if "id" in row and pd.notnull(row["id"]):
-                            try:
-                                update_data["notes"] = str(update_data["notes"])
-                                resp = supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
-                                if getattr(resp, "data", None):
-                                    st.success("Prospect updated. Please reload the app to see changes.")
-
-                                    subject = f"Follow-Up Updated: {new_first} {new_last}"
-                                    body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
-                                    send_email(new_assigned_to, subject, body)
-                                else:
-                                    err = getattr(resp, "error", None)
-                                    st.error(f"Failed to update prospect. {err or 'No rows returned.'}")
-                            except Exception as e:
-                                st.error(f"Failed to update prospect: {e}")
-                        else:
-                            st.error("Prospect ID not found. Cannot update.")
-
-                if st.button("🗑️ Delete Prospect"):
-                    if row is not None and "id" in row and row["id"]:
+                    if "id" in row and pd.notnull(row["id"]):
                         try:
-                            resp = supabase.table("prospects").delete().eq("id", row["id"]).execute()
-                            st.success("Prospect deleted. Please reload the app to see changes.")
+                            update_data["notes"] = str(update_data["notes"])
+                            resp = supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
+                            if getattr(resp, "data", None):
+                                st.success("Prospect updated. Please reload the app to see changes.")
+
+                                subject = f"Follow-Up Updated: {new_first} {new_last}"
+                                body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {new_follow_up}."
+                                send_email(new_assigned_to, subject, body)
+                            else:
+                                err = getattr(resp, "error", None)
+                                st.error(f"Failed to update prospect. {err or 'No rows returned.'}")
                         except Exception as e:
-                            st.error(f"Failed to delete prospect: {e}")
+                            st.error(f"Failed to update prospect: {e}")
                     else:
-                        st.error("Prospect ID not found. Cannot delete.")
-    else:
-        st.info("No prospects match the selected client(s).")
+                        st.error("Prospect ID not found. Cannot update.")
+
+            if st.button("🗑️ Delete Prospect"):
+                if row is not None and "id" in row and row["id"]:
+                    try:
+                        resp = supabase.table("prospects").delete().eq("id", row["id"]).execute()
+                        st.success("Prospect deleted. Please reload the app to see changes.")
+                    except Exception as e:
+                        st.error(f"Failed to delete prospect: {e}")
+                else:
+                    st.error("Prospect ID not found. Cannot delete.")
 else:
-    st.info("No prospects found.")
+    st.info("No prospects match the selected filters.")
 
 # === Reminders (Overdue+Next 7d, Once/Day, Batched by Recipient) ===
 REMINDER_WINDOW_DAYS = 7
@@ -443,15 +428,15 @@ window_end = _today + timedelta(days=REMINDER_WINDOW_DAYS)
 
 st.subheader("🔔 Follow-Ups: Overdue + Next 7 Days")
 
+# Use full df (not just filtered) for reminders, preserving original behavior
 if not df.empty:
-    # Normalize
+    df = df.copy()
     df["follow_up_date"] = pd.to_datetime(df["follow_up_date"], errors="coerce").dt.date
     if "last_reminded_on" not in df.columns:
         df["last_reminded_on"] = None
     else:
         df["last_reminded_on"] = pd.to_datetime(df["last_reminded_on"], errors="coerce").dt.date
 
-    # Filter: overdue OR due within next 7 days
     due = df[df["follow_up_date"] <= window_end].copy()
 
     if not due.empty:
@@ -499,30 +484,3 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
