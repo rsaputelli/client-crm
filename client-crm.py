@@ -238,9 +238,37 @@ with st.sidebar.form("add_prospect"):
         except Exception as e:
             st.error(f"Failed to add prospect: {e}")
 
-# === Upload CSV ===
+# === Upload Prospects CSV ===
 st.sidebar.header("📄 Upload Prospects CSV")
+
+# Admin-only: downloadable blank CSV template (headers only)
+if IS_ADMIN:
+    template_cols = [
+        "first_name",
+        "last_name",
+        "title",
+        "company",
+        "phone",
+        "email",
+        "address",
+        "website",
+        "assigned_to_email",
+        "follow_up_date",   # YYYY-MM-DD (or leave blank)
+        "clients"           # comma-separated, e.g. "WOEMA, SCAAP"
+    ]
+    # 0-row DataFrame → headers only
+    template_df = pd.DataFrame(columns=template_cols)
+    template_csv_bytes = template_df.to_csv(index=False).encode("utf-8")
+    st.sidebar.download_button(
+        "⬇️ Download CSV Template",
+        data=template_csv_bytes,
+        file_name="prospects_upload_template.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
 uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
+
 if uploaded_file:
     df_upload = pd.read_csv(uploaded_file)
     if "follow_up_date" in df_upload.columns:
@@ -515,6 +543,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
