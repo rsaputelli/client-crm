@@ -438,8 +438,7 @@ if not df_filtered.empty:
                             resp = supabase.table("prospects").update(update_data).eq("id", row["id"]).execute()
                             if getattr(resp, "data", None):
                                 st.success("Prospect updated.")
-                                # Keep the same selection; avoid st.rerun()
-                                st.session_state["selected_id"] = row["id"]
+                                # Do not modify st.session_state["selected_id"] or call st.rerun() here.
                                 subject = f"Follow-Up Updated: {new_first} {new_last}"
                                 body = f"The follow-up for {new_first} {new_last} at {new_company} has been updated to {(fu_input if fu_input else 'No Date')}."
                                 if new_assigned_to:
@@ -527,6 +526,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
