@@ -18,7 +18,8 @@ from supabase import create_client, Client
 
 # === CONFIG ===
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+# Prefer service role for scheduled job; fall back to regular key if provided
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ["SUPABASE_KEY"]
 EMAIL_HOST = os.environ["EMAIL_HOST"]
 EMAIL_PORT = int(os.environ["EMAIL_PORT"])
 EMAIL_USER = os.environ["EMAIL_USER"]
