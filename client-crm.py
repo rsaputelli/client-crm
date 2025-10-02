@@ -251,19 +251,94 @@ client_choices = CLIENT_OPTIONS if IS_ADMIN else ALLOWED
 filter_clients = st.multiselect(
     "Filter by Client",
     client_choices,
-    default=([] if IS_ADMIN else ALLOWED),
+    default=([] if IS_ADMIN else ALLOWED)
+from io import BytesIO
+
+# --- Export & Owner Filter block (inserted) ---
+# Start from base df and enforce non-admin restriction first
+base_df = df.copy()
+if not IS_ADMIN and not base_df.empty:
+    base_df = base_df[base_df["clients"].apply(
+        lambda x: any(c in x for c in ALLOWED) if isinstance(x, (str, list)) else False
+    )]
+
+# Owner choices limited to what current user can see
+owner_choices = []
+if not base_df.empty and "assigned_to_email" in base_df.columns:
+    owner_choices = sorted(base_df["assigned_to_email"].dropna().unique().tolist())
+
+filter_owners = st.multiselect(
+    "Filter by Owner (assigned_to_email)",
+    owner_choices,
+    default=[],
 )
 
+# Build the filtered frame used for BOTH display and export
+df_filtered = base_df
+
+# Client filter (handles string or list in `clients`)
+# if filter_clients:
+#     df_filtered = df_filtered[df_filtered["clients"].apply(
+#         lambda x: any(c in (x if isinstance(x, list) else [x]) for c in filter_clients) if isinstance(x, (str, list)) else False
+#     )]
+# 
+# # Owner filter
+# if filter_owners:
+#     df_filtered = df_filtered[df_filtered["assigned_to_email"].isin(filter_owners)]
+# 
+# # Optional: normalize / sort by follow_up_date
+# if not df_filtered.empty and "follow_up_date" in df_filtered.columns:
+#     if not pd.api.types.is_datetime64_any_dtype(df_filtered["follow_up_date"]):
+#         df_filtered["follow_up_date"] = pd.to_datetime(df_filtered["follow_up_date"], errors="coerce")
+#     df_filtered = df_filtered.sort_values(by="follow_up_date", na_position="last")
+# 
+# # Prepare export (exclude internal id)
+# safe_cols = [c for c in df_filtered.columns if c != "id"]
+# export_df = df_filtered[safe_cols].copy()
+# 
+# st.markdown("#### ⬇️ Export filtered prospects")
+# col_csv, col_xlsx = st.columns(2)
+# 
+# # CSV
+# csv_bytes = export_df.to_csv(index=False).encode("utf-8")
+# col_csv.download_button(
+#     "Download CSV",
+#     data=csv_bytes,
+#     file_name="prospects_filtered.csv",
+#     mime="text/csv",
+#     use_container_width=True,
+# )
+# 
+# # XLSX
+# xlsx_buffer = BytesIO()
+# with pd.ExcelWriter(xlsx_buffer) as writer:
+#     export_df.to_excel(writer, index=False, sheet_name="Prospects")
+# xlsx_buffer.seek(0)
+# col_xlsx.download_button(
+#     "Download Excel (.xlsx)",
+#     data=xlsx_buffer,
+#     file_name="prospects_filtered.xlsx",
+#     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+#     use_container_width=True,
+# )
+# 
+# # IMPORTANT for downstream: use `df_filtered` as the display dataframe
+# # e.g., st.dataframe(df_filtered), not the original `df`.
+# ,
+# )
+# 
+# if not df.empty:
+#     # Hard-limit non-admin view to allowed clients (belt-and-suspenders; RLS should also enforce)
+# #     if not IS_ADMIN:
+# #         df = df[df["clients"].apply(lambda x: any(c in x for c in ALLOWED) if isinstance(x, str) else False)]
+# # 
+# #     
+# # Apply selected filter
+#     if filter_clients:
+#         df = df[df["clients"].apply(lambda x: any(client in x for client in filter_clients) if isinstance(x, str) else False)]
+# 
+#     
 if not df.empty:
-    # Hard-limit non-admin view to allowed clients (belt-and-suspenders; RLS should also enforce)
-    if not IS_ADMIN:
-        df = df[df["clients"].apply(lambda x: any(c in x for c in ALLOWED) if isinstance(x, str) else False)]
-
-    # Apply selected filter
-    if filter_clients:
-        df = df[df["clients"].apply(lambda x: any(client in x for client in filter_clients) if isinstance(x, str) else False)]
-
-    if not df.empty:
         df = df.sort_values(by="follow_up_date")
         with st.expander("📋 View All Prospects", expanded=True):
             safe_cols = [c for c in df.columns if c != "id"]
@@ -422,6 +497,9 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
+
+
 
 
 
