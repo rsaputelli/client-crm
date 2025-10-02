@@ -167,11 +167,17 @@ except Exception:
 if IS_ADMIN:
     st.sidebar.markdown("### ⏰ Reminder Settings")
 
-    # fetch current setting from Supabase
+    # fetch or initialize setting
     try:
-        res = supabase.table("reminder_settings").select("frequency").single().execute()
-        current_freq = (res.data or {}).get("frequency", "daily")
+        res = supabase.table("reminder_settings").select("frequency").eq("id", 1).single().execute()
+        if res.data:
+            current_freq = res.data.get("frequency", "daily")
+        else:
+            # auto-seed with default daily if missing
+            supabase.table("reminder_settings").upsert({"id": 1, "frequency": "daily"}).execute()
+            current_freq = "daily"
     except Exception:
+        # if table missing or other error, default
         current_freq = "daily"
 
     freq_choice = st.sidebar.radio(
@@ -509,6 +515,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
