@@ -55,7 +55,7 @@ with header_right:
 
 CLIENT_OPTIONS = [
     "WOEMA", "SCAAP", "CTAAP", "NJAFP", "DAFP", "MAFP", "HAFP",
-    "PAACP", "DEACP", "ACPNJ", "NSSA", "SEMPA", "WAPA", "NHCMA"
+    "PAACP", "DEACP", "ACPNJ", "SEMPA", "WAPA", "NHCMA", "ASCIP", "NHCBA", "GBBA", "FCBA"
 ]
 
 # Optional: sidebar logo
@@ -162,6 +162,31 @@ try:
         st.sidebar.warning("⚠️ Approaching Supabase Free Tier limit (20,000 rows)")
 except Exception:
     st.sidebar.error("Could not fetch prospect count")
+    
+# === Admin-only Reminder Settings ===
+if IS_ADMIN:
+    st.sidebar.markdown("### ⏰ Reminder Settings")
+
+    # fetch current setting from Supabase
+    try:
+        res = supabase.table("reminder_settings").select("frequency").single().execute()
+        current_freq = (res.data or {}).get("frequency", "daily")
+    except Exception:
+        current_freq = "daily"
+
+    freq_choice = st.sidebar.radio(
+        "Email reminder frequency",
+        options=["daily", "weekly", "off"],
+        index=["daily", "weekly", "off"].index(current_freq),
+        help="Choose how often automated reminders are sent"
+    )
+
+    if st.sidebar.button("Save Reminder Setting"):
+        try:
+            supabase.table("reminder_settings").upsert({"id": 1, "frequency": freq_choice}).execute()
+            st.sidebar.success(f"Reminder frequency set to {freq_choice}")
+        except Exception as e:
+            st.sidebar.error(f"Failed to update: {e}")
 
 # === Form to Add New Prospect ===
 st.sidebar.header("➕ Add New Prospect")
@@ -484,6 +509,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
