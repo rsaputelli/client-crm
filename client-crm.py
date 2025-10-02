@@ -252,6 +252,8 @@ filter_clients = st.multiselect(
     "Filter by Client",
     client_choices,
     default=([] if IS_ADMIN else ALLOWED)
+)
+
 from io import BytesIO
 
 # --- Export & Owner Filter block (inserted) ---
@@ -497,6 +499,7 @@ if not df.empty:
         st.success("No due or overdue follow-ups within the next 7 days!")
 else:
     st.info("No prospects found.")
+
 
 
 
